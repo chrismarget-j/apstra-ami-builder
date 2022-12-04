@@ -9,7 +9,7 @@ DOWNLOAD_PAGE="https://support.juniper.net/support/downloads/?p=afc"
 MOD="module.upload"
 F_LABEL="${MOD}.aws_lambda_function.ours"
 
-echo -n "checking for valid awd credentials...  "
+echo -n "checking for valid aws credentials...  "
 aws sts get-caller-identity > /dev/null
 echo "done."
 
