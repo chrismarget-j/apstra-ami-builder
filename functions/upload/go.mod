@@ -1,4 +1,4 @@
-module github.com/chrismarget-j/apstraami
+module github.com/chrismarget-j/apstraami/upload
 
 go 1.19
 

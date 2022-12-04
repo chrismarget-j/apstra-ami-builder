@@ -1,4 +1,4 @@
-package apstraami
+package upload
 
 import (
 	"archive/tar"
