@@ -40,7 +40,7 @@ resource "aws_iam_policy" "ours" {
       {
         Effect   = "Allow",
         Action   = "s3:PutObject",
-        Resource = "${data.aws_s3_bucket.ours.arn}/*"
+        Resource = "${data.aws_s3_bucket.vmdk.arn}/*"
       }
     ]
   })
