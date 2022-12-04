@@ -3,6 +3,7 @@ package apstraami
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 )
 
@@ -23,6 +24,7 @@ type Response struct {
 }
 
 func HandleRequest(request Request) (*Response, error) {
+	log.Printf("request received: '%s'", request)
 	bucketName, found := os.LookupEnv(bucketNameEnv)
 	if !found {
 		err := fmt.Errorf("environment variable '%s' not set", bucketNameEnv)
@@ -32,6 +34,7 @@ func HandleRequest(request Request) (*Response, error) {
 		err := fmt.Errorf("environment variable '%s' empty", bucketNameEnv)
 		return &Response{Error: err.Error()}, err
 	}
+	log.Printf("files will be extracked to bucket '%s'", bucketName)
 
 	faer, err := FetchAndExtract(context.TODO(), FetchAndExtractRequest{
 		Url:        request.Url,

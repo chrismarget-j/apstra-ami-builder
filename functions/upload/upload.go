@@ -100,17 +100,22 @@ func doHttp(ctx context.Context, req doHttpRequest) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("error creating http request - %w", err)
 	}
 
-	resp, err := req.httpClient().Do(httpReq)
+	log.Println("start http transaction")
+	httpResponse, err := req.httpClient().Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("error performing http request - %w", err)
 	}
 
-	if resp.StatusCode/100 != 2 {
-		resp.Body.Close()
-		return nil, fmt.Errorf("http response code %d from server", resp.StatusCode)
+	if httpResponse.StatusCode/100 != 2 {
+		httpResponse.Body.Close()
+		return nil, fmt.Errorf("http response code %d from server", httpResponse.StatusCode)
 	}
 
-	return resp.Body, nil
+	log.Printf("http status code: %d", httpResponse.StatusCode)
+	log.Printf("http content length: %d", httpResponse.ContentLength)
+	log.Printf("http content type: '%s'", httpResponse.Header.Get("content-type"))
+
+	return httpResponse.Body, nil
 }
 
 type extractSelectedToS3Request struct {
@@ -135,7 +140,7 @@ func extractSelectedToS3(ctx context.Context, req *extractSelectedToS3Request) e
 
 	tarReader := tar.NewReader(req.src)
 	// loop through archive entries
-	log.Println("beginning archive loop")
+	log.Println("looping over files in archive")
 	for {
 		// quit if we're cancelled
 		select {
@@ -208,7 +213,6 @@ type extractFileToS3Response struct {
 }
 
 func extractFileToS3(ctx context.Context, req extractFileToS3Request) (*extractFileToS3Response, error) {
-	log.Println("extractFileToS3: req.key")
 	params := &s3.PutObjectInput{
 		Bucket:        aws.String(req.bucket),
 		Key:           aws.String(req.key),
