@@ -35,6 +35,7 @@ This repository faciliates running Juniper Apstra in AWS by doing the following:
 the steps outlined above, but don't have direct access to the Apstra software.
 We'll give it tokenized links to your preferred Apstra version next.
   ```shell
+  terraform -chdir=terraform init
   terraform -chdir=terraform apply
   ```
 1. Run the deploy script and follow the prompts. It will ask for a tokenized 
