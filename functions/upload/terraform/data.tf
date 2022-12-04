@@ -5,7 +5,7 @@ data "aws_caller_identity" "ours" {}
 data "aws_partition" "ours" {}
 
 data "aws_s3_bucket" "ours" {
-  bucket = var.bucket_name
+  bucket = var.vmdk_bucket_name
 }
 
 locals {

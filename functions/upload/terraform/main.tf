@@ -60,7 +60,7 @@ resource "aws_lambda_function" "ours" {
   timeout       = 180
   environment {
     variables = {
-      BUCKET_NAME = var.bucket_name
+      BUCKET_NAME = var.vmdk_bucket_name
     }
   }
   lifecycle {
