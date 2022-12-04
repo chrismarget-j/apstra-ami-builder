@@ -3,8 +3,8 @@
 // file is written, so we're required to write output to a real file.
 data "archive_file" "watch_src_dir" {
   type        = "zip"
-  source_dir  = local.lambda_src_dir
-  output_path = "${local.tmp_dir}/watch_src_dir.${basename(local.lambda_src_dir)}.garbage.zip"
+  source_dir  = local.src_dir
+  output_path = "${local.scratchpad_dir}/watch_src_dir.garbage.zip"
 }
 
 // Build the project whenever the archive_file.watch_src_dir detects changes
@@ -13,15 +13,15 @@ resource "null_resource" "build_project" {
     doit = data.archive_file.watch_src_dir.output_md5
   }
   provisioner "local-exec" {
-    working_dir = local.lambda_src_dir
-    command     = "GOOS=linux GOARCH=amd64 go build -o ${local.lambda_bin_file} lambda/main.go"
+    working_dir = local.src_dir
+    command     = "GOOS=linux GOARCH=amd64 go build -o ${local.bin_file} ${local.main}"
   }
 }
 
 // AWS requires lambdas be delivered in .zip format
 data "archive_file" "zipped_for_lambda" {
   type        = "zip"
-  source_file = local.lambda_bin_file
-  output_path = local.lambda_zip_file
+  source_file = local.bin_file
+  output_path = local.zip_file
   depends_on  = [null_resource.build_project]
 }

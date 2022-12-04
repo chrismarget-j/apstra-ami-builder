@@ -17,8 +17,9 @@ type Request struct {
 }
 
 type Response struct {
-	Etags map[string]string `json:"etags,omitempty"`
-	Error string            `json:"error,omitempty"`
+	Bucket string            `json:"bucket,omitempty"`
+	Etags  map[string]string `json:"etags,omitempty"`
+	Error  string            `json:"error,omitempty"`
 }
 
 func HandleRequest(request Request) (*Response, error) {
@@ -42,5 +43,8 @@ func HandleRequest(request Request) (*Response, error) {
 		return nil, err
 	}
 
-	return &Response{Etags: faer.Etags}, nil
+	return &Response{
+		Bucket: bucketName,
+		Etags:  faer.Etags,
+	}, nil
 }

@@ -1,5 +1,5 @@
 resource "aws_s3_bucket" "ours" {
-  bucket_prefix = "apstra-images-go-"
+  bucket_prefix = "apstra-images-"
   force_destroy = true
 }
 
