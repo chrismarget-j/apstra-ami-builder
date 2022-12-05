@@ -50,7 +50,6 @@ URI_REGEX='^(([^:/?#]+):)?(//((([^:/?#]+)@)?([^:/?#]+)(:([0-9]+))?))?(/([^?#]*))
 [[ "$URI" =~ $URI_REGEX ]] || die "error parsing link" $?
 OVA_PATH="${BASH_REMATCH[10]}"
 OVA=$(basename $OVA_PATH)
-echo $OVA
 
 OVA_REGEX='^(aos_server_[0-9.]+-[0-9]+).ova$'
 [[ "$OVA" =~ $OVA_REGEX ]] || die "error parsing ova filename within link" $?
