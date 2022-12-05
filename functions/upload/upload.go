@@ -165,7 +165,8 @@ func extractSelectedToS3(ctx context.Context, req *extractSelectedToS3Request) e
 
 		// interesting file?
 		if bucketKey, found := req.files[header.Name]; found {
-			log.Printf("good one: '%s'\n", header.Name)
+			log.Printf("match found: '%s'\n", header.Name)
+			log.Printf("extracting %d bytes from archive\n", header.Size)
 			foundInTar[header.Name] = struct{}{}
 			apiResponse, err := extractFileToS3(ctx, extractFileToS3Request{
 				src:      tarReader,
