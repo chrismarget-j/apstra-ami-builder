@@ -20,7 +20,8 @@ resource "aws_iam_role" "ours" {
   })
 }
 
-resource "aws_iam_policy" "ours" {
+resource "aws_iam_role_policy" "ours" {
+  role = aws_iam_role.ours.id
   name_prefix = local.prefix
   policy = jsonencode({
     Version = "2012-10-17",
@@ -46,10 +47,10 @@ resource "aws_iam_policy" "ours" {
   })
 }
 
-resource "aws_iam_role_policy_attachment" "ours" {
-  role       = aws_iam_role.ours.name
-  policy_arn = aws_iam_policy.ours.arn
-}
+#resource "aws_iam_role_policy_attachment" "ours" {
+#  role       = aws_iam_role.ours.name
+#  policy_arn = aws_iam_policy.ours.arn
+#}
 
 resource "aws_lambda_function" "ours" {
   function_name = var.function_name
