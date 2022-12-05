@@ -1,16 +1,14 @@
 #!/bin/bash -eu
 set -o pipefail
 
-REPOROOT=$(cd $(dirname $0); pwd)
+REPOROOT=$(cd "$(dirname $0)"; pwd)
 TFROOT=${REPOROOT}/terraform
 
 DOWNLOAD_PAGE="https://support.juniper.net/support/downloads/?p=afc"
-
-MOD="module.upload"
-F_LABEL="${MOD}.aws_lambda_function.ours"
+FUNCTION_NAME_TFSTATE_PATH=".values.outputs.upload_function_name.value"
 
 die() {
-  echo $1
+  echo "$1"
   exit $2
 }
 
@@ -18,18 +16,34 @@ echo -n "Checking for valid aws credentials..."
 aws sts get-caller-identity > /dev/null
 echo "  Done."
 
-echo -n "Fetching and parsing terraform state..."
-STATE=$(terraform -chdir=${TFROOT} show -json)
-FUNCTION_NAME=$(jq -r ".values.root_module.child_modules[] | select(.address == \"$MOD\").resources[] | select(.address == \"$F_LABEL\").values.function_name" <<< $STATE)
+echo -n "Fetching terraform state..."
+if ! STATE=$(terraform -chdir=${TFROOT} show -json); then
+  die "  Error fetching terraform state - is the project deployed?" $?
+fi
+echo "  Done."
+
+echo -n "Parsing terraform state..."
+FUNCTION_NAME=$(jq -r "$FUNCTION_NAME_TFSTATE_PATH" <<< $STATE)
+if [ "$FUNCTION_NAME" == "null" ]; then
+  die "  Upload lambda function name not found in terrraform state - is the project deployed?" $?
+fi
 echo "  Done."
 
 echo ""
-echo "Please visit https://support.juniper.net/support/downloads/?p=afc and click"
+echo "Please visit $DOWNLOAD_PAGE and click"
 echo "the link for \"Apstra VM Image for VMware ESXi\" (an \"ova\" file). Then copy"
 echo "tokenized download link and paste it here."
 echo ""
-echo -n "link: "
-read URI
+if DEFAULT_LINK_PROMPT=$(printenv APSTRA_DOWNLOAD_LINK); then
+  echo -n "Download link [$DEFAULT_LINK_PROMPT]: "
+else
+  echo -n "Download link: "
+fi
+
+read -r URI
+if [ "$URI" == "" ]; then
+  URI=$DEFAULT_LINK_PROMPT
+fi
 
 URI_REGEX='^(([^:/?#]+):)?(//((([^:/?#]+)@)?([^:/?#]+)(:([0-9]+))?))?(/([^?#]*))(\?([^#]*))?(#(.*))?'
 
