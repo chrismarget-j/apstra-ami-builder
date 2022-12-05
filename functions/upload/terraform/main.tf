@@ -39,17 +39,15 @@ resource "aws_iam_role_policy" "ours" {
       },
       {
         Effect   = "Allow",
-        Action   = "s3:PutObject",
+        Action   = [
+          "s3:PutObject",
+          "s3:PutObjectTagging",
+        ]
         Resource = "${data.aws_s3_bucket.vmdk.arn}/*"
       }
     ]
   })
 }
-
-#resource "aws_iam_role_policy_attachment" "ours" {
-#  role       = aws_iam_role.ours.name
-#  policy_arn = aws_iam_policy.ours.arn
-#}
 
 resource "aws_lambda_function" "ours" {
   function_name = var.function_name
