@@ -1,6 +1,7 @@
 locals {
   // scratchpad for this function within var.scratchpad_dir
-  scratchpad_dir = abspath("${path.root}/.terraform/tmp/${basename(local.src_dir)}")
+  scratchpad_dir = abspath("${path.root}/.terraform/tmp/${basename(abspath("${local.src_dir}/.."))}")
+
 
   // source folder within this project, used during build
   src_dir = abspath("${path.module}/../src")
