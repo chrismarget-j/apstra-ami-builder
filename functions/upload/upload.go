@@ -18,7 +18,7 @@ import (
 
 type FetchAndExtractRequest struct {
 	Url        string
-	Files      map[string]string
+	Files      []S3ObjInfo
 	HttpClient *http.Client
 	BucketName string
 }
@@ -38,18 +38,23 @@ func (o FetchAndExtractRequest) validate() error {
 		return errors.New("validation error: no files requested for extraction")
 	}
 
-	dstMap := make(map[string]struct{})
-	for k, v := range o.Files {
-		if k == "" {
+	dstMap := make(map[string]struct{}, len(o.Files))
+	srcMap := make(map[string]struct{}, len(o.Files))
+	for _, s3ObjInfo := range o.Files {
+		if s3ObjInfo.Src == "" {
 			return errors.New("validation error: blank archive filename detected")
 		}
-		if v == "" {
+		if s3ObjInfo.Dst == "" {
 			return errors.New("validation error: blank s3 target key detected")
 		}
-		if _, found := dstMap[v]; found {
-			return fmt.Errorf("validation error: target '%s' specified more than once", v)
+		if _, found := srcMap[s3ObjInfo.Src]; found {
+			return fmt.Errorf("validation error: archive filename '%s' specified more than once", s3ObjInfo.Src)
 		}
-		dstMap[v] = struct{}{}
+		if _, found := dstMap[s3ObjInfo.Dst]; found {
+			return fmt.Errorf("validation error: S3 target key '%s' specified more than once", s3ObjInfo.Dst)
+		}
+		dstMap[s3ObjInfo.Dst] = struct{}{}
+		srcMap[s3ObjInfo.Src] = struct{}{}
 	}
 	return nil
 }
@@ -73,6 +78,7 @@ func FetchAndExtract(ctx context.Context, req FetchAndExtractRequest) (*FetchAnd
 		bucket: req.BucketName,
 		files:  req.Files,
 		etags:  make(map[string]string),
+		url:    req.Url,
 	}
 	err = extractSelectedToS3(ctx, &estr)
 	if err != nil {
@@ -119,14 +125,17 @@ func doHttp(ctx context.Context, req doHttpRequest) (io.ReadCloser, error) {
 }
 
 type extractSelectedToS3Request struct {
+	url    string
 	src    io.ReadCloser
 	bucket string
-	files  map[string]string // map[archivePath]bucketPath
+	files  []S3ObjInfo
 	etags  map[string]string
 }
 
 func extractSelectedToS3(ctx context.Context, req *extractSelectedToS3Request) error {
 	defer req.src.Close()
+
+	mapByArchiveName := mapS3ObjInfoBySrcFile(req.files)
 
 	awsCfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
@@ -164,21 +173,23 @@ func extractSelectedToS3(ctx context.Context, req *extractSelectedToS3Request) e
 		}
 
 		// interesting file?
-		if bucketKey, found := req.files[header.Name]; found {
+		if s3ObjInfo, found := mapByArchiveName[header.Name]; found {
 			log.Printf("match found: '%s'\n", header.Name)
 			log.Printf("extracting %d bytes from archive\n", header.Size)
 			foundInTar[header.Name] = struct{}{}
 			apiResponse, err := extractFileToS3(ctx, extractFileToS3Request{
-				src:      tarReader,
+				reader:   tarReader,
 				len:      header.Size,
 				bucket:   req.bucket,
-				key:      bucketKey,
 				s3Client: s3Client,
+				src:      s3ObjInfo.Src,
+				dst:      s3ObjInfo.Dst,
+				tags:     s3ObjInfo.Tags,
 			})
 			if err != nil {
 				return fmt.Errorf("error extracing file to s3 - %w", err)
 			}
-			req.etags[bucketKey] = apiResponse.etag
+			req.etags[s3ObjInfo.Dst] = apiResponse.etag
 		} else {
 			log.Printf("skipping '%s'\n", header.Name)
 		}
@@ -192,20 +203,30 @@ func extractSelectedToS3(ctx context.Context, req *extractSelectedToS3Request) e
 	// some files were not found -- but which ones?
 	missing := make([]string, len(req.files)-len(foundInTar))
 	var i int
-	for k := range req.files {
-		if _, found := foundInTar[k]; !found {
-			missing[i] = k
+	for _, s3ObjInfo := range req.files {
+		if _, found := foundInTar[s3ObjInfo.Src]; !found {
+			missing[i] = s3ObjInfo.Src
 			i++
 		}
 	}
 	return fmt.Errorf("requested files not found in archive: '%s'", strings.Join(missing, "', '"))
 }
 
+func mapS3ObjInfoBySrcFile(in []S3ObjInfo) map[string]*S3ObjInfo {
+	result := make(map[string]*S3ObjInfo, len(in))
+	for i, s3ObjInfo := range in {
+		result[s3ObjInfo.Src] = &in[i]
+	}
+	return result
+}
+
 type extractFileToS3Request struct {
-	src      io.Reader
+	reader   io.Reader
+	src      string
+	dst      string
+	tags     []Tag
 	len      int64
 	bucket   string
-	key      string
 	s3Client *s3.Client
 }
 
@@ -214,11 +235,17 @@ type extractFileToS3Response struct {
 }
 
 func extractFileToS3(ctx context.Context, req extractFileToS3Request) (*extractFileToS3Response, error) {
+	tags := make([]string, len(req.tags))
+	for i, tag := range req.tags {
+		tags[i] = url.QueryEscape(tag.Key) + "=" + url.QueryEscape(tag.Value)
+	}
+
 	params := &s3.PutObjectInput{
 		Bucket:        aws.String(req.bucket),
-		Key:           aws.String(req.key),
-		Body:          req.src,
+		Key:           aws.String(req.dst),
+		Body:          req.reader,
 		ContentLength: req.len,
+		Tagging:       aws.String(strings.Join(tags, "&")),
 	}
 	apiResponse, err := req.s3Client.PutObject(ctx, params)
 	if err != nil {

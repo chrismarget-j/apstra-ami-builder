@@ -2,6 +2,7 @@ package upload
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -12,9 +13,19 @@ const (
 )
 
 type Request struct {
-	Url     string            `json:"url"`
-	FileMap map[string]string `json:"file_map"`
-	//Tags       map[string]string `json:"tag_map"`
+	Url   string      `json:"url"`
+	Files []S3ObjInfo `json:"files"`
+}
+
+type S3ObjInfo struct {
+	Src  string `json:"src"`
+	Dst  string `json:"dst"`
+	Tags []Tag  `json:"tags"`
+}
+
+type Tag struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
 }
 
 type Response struct {
@@ -24,7 +35,13 @@ type Response struct {
 }
 
 func HandleRequest(request Request) (*Response, error) {
-	log.Printf("request received: '%s'", request)
+	dump, err := json.Marshal(request)
+	if err != nil {
+		err = fmt.Errorf("error unmarshaling request - %w", err)
+		return &Response{Error: err.Error()}, err
+	}
+	log.Printf("request received: '%s'", string(dump))
+
 	bucketName, found := os.LookupEnv(bucketNameEnv)
 	if !found {
 		err := fmt.Errorf("environment variable '%s' not set", bucketNameEnv)
@@ -39,7 +56,7 @@ func HandleRequest(request Request) (*Response, error) {
 	faer, err := FetchAndExtract(context.TODO(), FetchAndExtractRequest{
 		Url:        request.Url,
 		BucketName: bucketName,
-		Files:      request.FileMap,
+		Files:      request.Files,
 	})
 
 	if err != nil {
