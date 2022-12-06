@@ -53,7 +53,7 @@ func HandleRequest(request Request) (*Response, error) {
 	}
 	log.Printf("files will be extracked to bucket '%s'", bucketName)
 
-	faer, err := FetchAndExtract(context.TODO(), FetchAndExtractRequest{
+	faer, err := FetchAndExtract(context.Background(), FetchAndExtractRequest{
 		Url:        request.Url,
 		BucketName: bucketName,
 		Files:      request.Files,
