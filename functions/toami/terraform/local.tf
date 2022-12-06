@@ -3,7 +3,7 @@ locals {
   scratchpad_dir = abspath("${path.root}/.terraform/tmp/${basename(local.src_dir)}")
 
   // source folder within this project, used during build
-  src_dir = abspath("${path.module}/..")
+  src_dir = abspath("${path.module}/../src")
 
   // go binary name
   handler_name = "lambda"
