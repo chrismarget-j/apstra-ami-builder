@@ -116,7 +116,7 @@ func (o *vmdkHandler) importSnapshot(ctx context.Context) error {
 		}
 	}
 
-	snapshotData, err := o.ec2Client.ImportSnapshot(ctx, &ec2.ImportSnapshotInput{
+	importSnapshotResponse, err := o.ec2Client.ImportSnapshot(ctx, &ec2.ImportSnapshotInput{
 		ClientData:  nil,
 		ClientToken: nil,
 		Description: aws.String(fmt.Sprintf("import s3://%s/%s", o.bucket, o.key)),
@@ -141,9 +141,14 @@ func (o *vmdkHandler) importSnapshot(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error creating snapshot - %w", err)
 	}
-	dump, _ := json.MarshalIndent(snapshotData, "", "  ")
+
+	dump, err := json.Marshal(importSnapshotResponse)
+	if err != nil {
+		return fmt.Errorf("error unmarshaling import snapshot response - %w", err)
+	}
+
 	log.Print(string(dump))
-	log.Printf("snapshot import task id: " + *snapshotData.ImportTaskId)
+	log.Printf("snapshot import task id: " + *importSnapshotResponse.ImportTaskId)
 	return nil
 }
 
