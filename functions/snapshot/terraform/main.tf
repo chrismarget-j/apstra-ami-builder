@@ -23,22 +23,22 @@ resource "aws_iam_role_policy" "ours" {
   name_prefix = local.prefix
   role        = aws_iam_role.ours.id
   policy = jsonencode({
-    Version = "2012-10-17",
+    Version = "2012-10-17"
     Statement = [
       {
-        Effect = "Allow",
+        Effect = "Allow"
         Action = [
           "logs:CreateLogGroup",
           "logs:CreateLogStream",
-          "logs:PutLogEvents"
-        ],
+          "logs:PutLogEvents",
+        ]
         Resource = [
           "${local.upload_log_group_arn}:/aws/lambda/${aws_lambda_function.ours.function_name}:*",
-          "${local.upload_log_group_arn}:/aws/lambda/${aws_lambda_function.ours.function_name}:log-stream:*"
+          "${local.upload_log_group_arn}:/aws/lambda/${aws_lambda_function.ours.function_name}:log-stream:*",
         ]
       },
       {
-        Effect = "Allow",
+        Effect = "Allow"
         Action = [
           "s3:GetBucketLocation",
           "s3:GetObject",
@@ -47,25 +47,23 @@ resource "aws_iam_role_policy" "ours" {
         Resource = [
           data.aws_s3_bucket.vmdk.arn,
           "${data.aws_s3_bucket.vmdk.arn}/*",
-          "${data.aws_s3_bucket.vmdk.arn}/${local.bucket_key_prefix}*${local.bucket_key_suffix}/*"
+          "${data.aws_s3_bucket.vmdk.arn}/${local.bucket_key_prefix}*${local.bucket_key_suffix}/*",
         ]
       },
       {
-        Effect = "Allow",
+        Effect = "Allow"
         Action = [
-          "ec2:ImportSnapshot",
-          "ec2:CopySnapshot",
           "ec2:CreateTags",
+          "ec2:CopySnapshot",
         ]
+        Resource = "arn:${data.aws_partition.ours.id}:ec2:${data.aws_region.ours.id}:${data.aws_caller_identity.ours.account_id}:import-snapshot-task/*"
+      },
+      {
+        Effect = "Allow"
+        Action = "ec2:ImportSnapshot"
         Resource = [
-#          "arn:${data.aws_partition.ours.id}:ec2:${data.aws_region.ours.id}:${data.aws_caller_identity.ours.account_id}:snapshot/*",
-#          "arn:${data.aws_partition.ours.id}:ec2:${data.aws_region.ours.id}:${data.aws_caller_identity.ours.account_id}:import-snapshot-task/*",
-          "*",
-          "arn:aws:ec2:us-east-1:086704128018:import-snapshot-task/*",
-          "arn:aws:ec2:us-east-1::import-snapshot-task/*",
-          #          "arn:${data.aws_partition.ours.id}:ec2:${data.aws_region.ours.id}::snapshot/*",
-          #          "arn:${data.aws_partition.ours.id}:ec2:${data.aws_region.ours.id}::import-snapshot-task/*",
-          #          "*"
+          "arn:${data.aws_partition.ours.id}:ec2:${data.aws_region.ours.id}::snapshot/*",
+          "arn:${data.aws_partition.ours.id}:ec2:${data.aws_region.ours.id}:${data.aws_caller_identity.ours.account_id}:import-snapshot-task/*",
         ]
       },
     ]
@@ -73,7 +71,7 @@ resource "aws_iam_role_policy" "ours" {
 }
 
 resource "aws_iam_role" "vmimport" {
-  name = "vmimport"
+  name_prefix = "${local.prefix}vmimport-"
   assume_role_policy = jsonencode({
     Version = "2012-10-17",
     Statement = [
@@ -151,4 +149,9 @@ resource "aws_lambda_function" "ours" {
   lifecycle {
     replace_triggered_by = [null_resource.build_project]
   }
+}
+
+resource "aws_lambda_function_event_invoke_config" "example" {
+  function_name          = aws_lambda_function.ours.function_name
+  maximum_retry_attempts = 0
 }

@@ -1,6 +1,6 @@
 locals {
-  upload_log_group_arn = "arn:${local.partition}:logs:${local.region}:${local.account}:log-group"
-  prefix               = "${var.function_name}-"
+  log_group_arn = "arn:${local.partition}:logs:${local.region}:${local.account}:log-group"
+  prefix        = "${var.function_name}-"
 }
 
 resource "aws_iam_role" "ours" {
@@ -33,13 +33,13 @@ resource "aws_iam_role_policy" "ours" {
           "logs:PutLogEvents"
         ],
         Resource = [
-          "${local.upload_log_group_arn}:/aws/lambda/${aws_lambda_function.ours.function_name}:*",
-          "${local.upload_log_group_arn}:/aws/lambda/${aws_lambda_function.ours.function_name}:log-stream:*"
+          "${local.log_group_arn}:/aws/lambda/${aws_lambda_function.ours.function_name}:*",
+          "${local.log_group_arn}:/aws/lambda/${aws_lambda_function.ours.function_name}:log-stream:*"
         ]
       },
       {
-        Effect   = "Allow",
-        Action   = [
+        Effect = "Allow",
+        Action = [
           "s3:PutObject",
           "s3:PutObjectTagging",
         ]

@@ -1,4 +1,4 @@
-module github.com/chrismarget-j/apstraami/toami
+module github.com/chrismarget-j/apstra-ami-builder/functions/snapshot
 
 go 1.19
 
