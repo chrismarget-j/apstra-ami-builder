@@ -11,10 +11,13 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	s3Types "github.com/aws/aws-sdk-go-v2/service/s3/types"
 	"log"
+	"os"
 )
 
 const (
-	vmdkFormat = "VMDK"
+	vmdkFormat        = "VMDK"
+	defaultImportRole = "vmimport"
+	importRoleEnv     = "ROLE_NAME"
 )
 
 //type Request struct {
@@ -116,7 +119,7 @@ func (o *vmdkHandler) importSnapshot(ctx context.Context) error {
 	snapshotData, err := o.ec2Client.ImportSnapshot(ctx, &ec2.ImportSnapshotInput{
 		ClientData:  nil,
 		ClientToken: nil,
-		Description: nil,
+		Description: aws.String(fmt.Sprintf("import s3://%s/%s", o.bucket, o.key)),
 		DiskContainer: &ec2Types.SnapshotDiskContainer{
 			Description: nil,
 			Format:      aws.String(vmdkFormat),
@@ -129,7 +132,7 @@ func (o *vmdkHandler) importSnapshot(ctx context.Context) error {
 		//DryRun:            nil,
 		//Encrypted:         nil,
 		//KmsKeyId:          nil,
-		//RoleName:          nil,
+		RoleName: roleName(),
 		TagSpecifications: []ec2Types.TagSpecification{{
 			ResourceType: ec2Types.ResourceTypeImportSnapshotTask,
 			Tags:         tags,
@@ -138,6 +141,15 @@ func (o *vmdkHandler) importSnapshot(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("error creating snapshot - %w", err)
 	}
+	dump, _ := json.MarshalIndent(snapshotData, "", "  ")
+	log.Print(string(dump))
 	log.Printf("snapshot import task id: " + *snapshotData.ImportTaskId)
 	return nil
+}
+
+func roleName() *string {
+	if role, ok := os.LookupEnv(importRoleEnv); ok {
+		return aws.String(role)
+	}
+	return aws.String(defaultImportRole)
 }

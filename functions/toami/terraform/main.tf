@@ -143,6 +143,11 @@ resource "aws_lambda_function" "ours" {
   runtime       = "go1.x"
   filename      = data.archive_file.zipped_for_lambda.output_path
   timeout       = 180
+  environment {
+    variables = {
+      ROLE_NAME = aws_iam_role.vmimport.name
+    }
+  }
   lifecycle {
     replace_triggered_by = [null_resource.build_project]
   }
