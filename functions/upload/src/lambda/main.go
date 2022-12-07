@@ -2,9 +2,9 @@ package main
 
 import (
 	"github.com/aws/aws-lambda-go/lambda"
-	uploadx "github.com/chrismarget-j/apstraami/upload"
+	"github.com/chrismarget-j/apstra-ami-builder/functions/upload"
 )
 
 func main() {
-	lambda.Start(uploadx.HandleRequest)
+	lambda.Start(upload.HandleRequest)
 }
