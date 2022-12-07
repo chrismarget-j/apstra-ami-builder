@@ -105,6 +105,14 @@ func (o *vmdkHandler) getTags(ctx context.Context) error {
 
 func (o *vmdkHandler) importSnapshot(ctx context.Context) error {
 	log.Printf("importing snapshot")
+	tags := make([]ec2Types.Tag, len(o.tagSet))
+	for i, tag := range o.tagSet {
+		tags[i] = ec2Types.Tag{
+			Key:   tag.Key,
+			Value: tag.Value,
+		}
+	}
+
 	snapshotData, err := o.ec2Client.ImportSnapshot(ctx, &ec2.ImportSnapshotInput{
 		ClientData:  nil,
 		ClientToken: nil,
@@ -118,11 +126,14 @@ func (o *vmdkHandler) importSnapshot(ctx context.Context) error {
 				S3Key:    aws.String(o.key),
 			},
 		},
-		DryRun:            nil,
-		Encrypted:         nil,
-		KmsKeyId:          nil,
-		RoleName:          nil,
-		TagSpecifications: nil,
+		//DryRun:            nil,
+		//Encrypted:         nil,
+		//KmsKeyId:          nil,
+		//RoleName:          nil,
+		TagSpecifications: []ec2Types.TagSpecification{{
+			ResourceType: ec2Types.ResourceTypeImportSnapshotTask,
+			Tags:         tags,
+		}},
 	})
 	if err != nil {
 		return fmt.Errorf("error creating snapshot - %w", err)
