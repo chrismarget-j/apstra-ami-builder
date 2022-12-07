@@ -9,7 +9,7 @@ terraform {
     encrypt        = true
     bucket         = "t3aco-terraform-state"
     dynamodb_table = "terraform-state-lock"
-    key            = "apstra-ami-deployer-go"
+    key            = "apstra-ami-builder"
     region         = "us-east-1"
   }
 }
