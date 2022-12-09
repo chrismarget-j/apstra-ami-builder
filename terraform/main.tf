@@ -9,3 +9,8 @@ module "snapshot" {
   source = "../functions/snapshot/terraform"
   vmdk_bucket_name = module.upload.vmdk_bucket_name
 }
+
+//
+module "installci" {
+  source = "../functions/installci/terraform"
+}

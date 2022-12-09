@@ -101,11 +101,13 @@ prompt_for_link
 read_uri
 read_ova_filename
 
-URITAG=$(make_tag url $SHORT_URI)
-VERTAG=$(make_tag version $VERSION)
-BUILDTAG=$(make_tag build $BUILD)
+URITAG=$(make_tag "url" "$SHORT_URI")
+VERTAG=$(make_tag "version" "$VERSION")
+BUILDTAG=$(make_tag "build" "$BUILD")
+NAMETAG=$(make_tag "Name" "apstra $VERSION")
+CITAG=$(make_tag "cloud-init" "false")
 
-TAGS=$(jq -s . <<< "$URITAG $VERTAG $BUILDTAG")
+TAGS=$(jq -s . <<< "$URITAG $VERTAG $BUILDTAG $NAMETAG $CITAG")
 
 S3OBJINFO="{}"
 S3OBJINFO=$(jq -c ".|.[\"src\"]=\"$VMDK\"" <<< $S3OBJINFO)

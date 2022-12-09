@@ -21,6 +21,9 @@ resource "aws_lambda_permission" "allow_bucket" {
   principal     = "s3.amazonaws.com"
   source_arn    = "arn:aws:s3:::${var.vmdk_bucket_name}"
   lifecycle {
-    replace_triggered_by = [null_resource.build_project]
+    replace_triggered_by = [
+      null_resource.build_project,
+      aws_lambda_function.ours,
+    ]
   }
 }

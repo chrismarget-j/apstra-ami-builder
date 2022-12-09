@@ -117,21 +117,15 @@ func (o *vmdkHandler) importSnapshot(ctx context.Context) error {
 	}
 
 	importSnapshotResponse, err := o.ec2Client.ImportSnapshot(ctx, &ec2.ImportSnapshotInput{
-		ClientData:  nil,
-		ClientToken: nil,
 		Description: aws.String(fmt.Sprintf("import s3://%s/%s", o.bucket, o.key)),
 		DiskContainer: &ec2Types.SnapshotDiskContainer{
-			Description: nil,
+			Description: aws.String(fmt.Sprintf("import s3://%s/%s", o.bucket, o.key)),
 			Format:      aws.String(vmdkFormat),
-			Url:         nil,
 			UserBucket: &ec2Types.UserBucket{
 				S3Bucket: aws.String(o.bucket),
 				S3Key:    aws.String(o.key),
 			},
 		},
-		//DryRun:            nil,
-		//Encrypted:         nil,
-		//KmsKeyId:          nil,
 		RoleName: roleName(),
 		TagSpecifications: []ec2Types.TagSpecification{{
 			ResourceType: ec2Types.ResourceTypeImportSnapshotTask,
