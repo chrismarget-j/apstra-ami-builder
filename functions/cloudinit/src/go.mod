@@ -1,4 +1,4 @@
-module github.com/chrismarget-j/apstra-ami-builder/functions/cloudinit
+module github.com/chrismarget-j/apstra-ami-builder/functions/cloudinit/src
 
 go 1.19
 
