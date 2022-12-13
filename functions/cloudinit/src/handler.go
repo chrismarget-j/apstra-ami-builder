@@ -7,8 +7,8 @@ import (
 )
 
 const (
-	messagePing = "ping"
-	messagePong = "pong"
+	MessagePing = "ping"
+	MessagePong = "pong"
 )
 
 type Request struct {
@@ -30,9 +30,9 @@ func HandleRequest(ctx context.Context, request *Request) (*Response, error) {
 	}
 
 	switch request.Operation {
-	case messagePing:
+	case MessagePing:
 		return &Response{
-			Message: messagePong,
+			Message: MessagePong,
 		}, nil
 	default:
 		err := fmt.Errorf("unknown operation: '%s'", request.Operation)
