@@ -1,0 +1,43 @@
+package cloudinit
+
+import (
+	"context"
+	"errors"
+	"fmt"
+)
+
+const (
+	messagePing = "ping"
+	messagePong = "pong"
+)
+
+type Request struct {
+	InstanceIp string `json:"instance_ip"`
+	Operation  string `json:"operation"`
+}
+
+type Response struct {
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+func HandleRequest(ctx context.Context, request *Request) (*Response, error) {
+	if request == nil {
+		err := errors.New("error: nil Request")
+		return &Response{
+			Error: err.Error(),
+		}, err
+	}
+
+	switch request.Operation {
+	case messagePing:
+		return &Response{
+			Message: messagePong,
+		}, nil
+	default:
+		err := fmt.Errorf("unknown operation: '%s'", request.Operation)
+		return &Response{Message: err.Error()}, err
+	}
+
+	return nil, nil
+}
