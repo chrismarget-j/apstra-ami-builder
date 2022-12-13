@@ -7,9 +7,10 @@ import (
 )
 
 const (
-	MessagePing    = "ping"
-	MessagePong    = "pong"
-	MessageSuccess = "success"
+	MessagePing      = "ping"
+	MessagePong      = "pong"
+	MessageSuccess   = "success"
+	OperationInstall = "install"
 )
 
 type Request struct {
