@@ -152,7 +152,7 @@ resource "aws_lambda_function" "ours" {
   role          = aws_iam_role.ours.arn
   runtime       = "go1.x"
   filename      = data.archive_file.zipped_for_lambda.output_path
-  timeout       = 360
+  timeout       = 600
   environment {
     variables = {
       INSTALL_CI_LAMBDA_NAME           = var.install_ci_lambda_name

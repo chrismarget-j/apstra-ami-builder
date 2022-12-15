@@ -41,7 +41,7 @@ const (
 	ec2InstanceIterationWait    = 500 * time.Millisecond
 	ec2InstanceIterationsMax    = 30
 	ec2SnapshotIterationWait    = 500 * time.Millisecond
-	ec2SnapshotIterationsMax    = 120
+	ec2SnapshotIterationsMax    = 300
 
 	dyingBreathInterval = 5 * time.Second
 )
