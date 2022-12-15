@@ -8,6 +8,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.18.4
 	github.com/aws/aws-sdk-go-v2/service/ec2 v1.75.0
 	github.com/aws/aws-sdk-go-v2/service/lambda v1.26.1
+	github.com/chrismarget-j/apstra-ami-builder/functions/cloudinit/src v0.0.0-20221213202951-6a474ebee4ea
 )
 
 require (

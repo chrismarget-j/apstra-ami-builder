@@ -37,49 +37,6 @@ resource "aws_iam_role_policy" "ours" {
           "${local.log_group_arn}:/aws/lambda/${aws_lambda_function.ours.function_name}:log-stream:*"
         ]
       },
-#      {
-#        Effect   = "Allow",
-#        Action   = [
-#          "ec2:CreateTags",
-#        ]
-#        Resource = [
-#          "aws:${local.partition}:ec2:${local.region}:${local.account}:instance/*"
-#        ]
-#      },
-#      {
-#        Effect   = "Allow",
-#        Action   = [
-#          "ec2:CreateTags",
-#          "ec2:DescribeImportSnapshotTasks",
-#          "eC2:DescribeInstances",
-#          "eC2:RunInstances",
-#        ]
-#        Resource = [
-#          "*",
-#        ]
-#      },
-#      {
-#        Effect = "Allow",
-#        Action = [
-#          "ec2:CreateTags",
-#          "ec2:RegisterImage",
-#        ]
-#        Resource = [
-#          "arn:${local.partition}:ec2:${local.region}::snapshot/*",
-#          "arn:${local.partition}:ec2:${local.region}::image/*",
-#        ]
-#      },
-#      {
-#        Effect = "Allow",
-#        Action = [
-#          "ec2:CreateNetworkInterface",
-#          "ec2:DescribeNetworkInterfaces",
-#          "ec2:DeleteNetworkInterface",
-#          "ec2:AssignPrivateIpAddresses",
-#          "ec2:UnassignPrivateIpAddresses"
-#        ]
-#        Resource = "*"
-#      }
     ]
   })
 }
@@ -96,27 +53,16 @@ resource "aws_lambda_function" "ours" {
   runtime       = "go1.x"
   filename      = data.archive_file.zipped_for_lambda.output_path
   timeout       = 180
-#  environment {
-#    variables = {
-#      INSTALL_CI_LAMBDA_NAME = var.install_ci_lambda_name
-#      INSTALL_CI_LAMBDA_SECURITY_GROUP = aws_security_group.ours.id
-#      INSTANCE_TYPE = var.temp_instance_type
-#    }
-#  }
+  environment {
+    variables = {
+      DEBUG_SKIP_SHUTDOWN = "false"
+    }
+  }
+  vpc_config {
+    security_group_ids = [data.aws_security_group.ours.id]
+    subnet_ids         = data.aws_subnets.ours.ids
+  }
   lifecycle {
     replace_triggered_by = [null_resource.build_project]
   }
 }
-
-#resource "aws_lambda_permission" "allow_ami_builder" {
-#  function_name = aws_lambda_function.ours.function_name
-#  action        = "lambda:InvokeFunction"
-#  principal     = "events.amazonaws.com"
-#  source_arn    = aws_cloudwatch_event_rule.snapshot.arn
-#  lifecycle {
-#    replace_triggered_by = [
-#      null_resource.build_project,
-#      aws_lambda_function.ours,
-#    ]
-#  }
-#}

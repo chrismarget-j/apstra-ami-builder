@@ -28,6 +28,14 @@ github.com/aws/aws-sdk-go-v2/service/sts v1.17.6 h1:VQFOLQVL3BrKM/NLO/7FiS4vcp5b
 github.com/aws/aws-sdk-go-v2/service/sts v1.17.6/go.mod h1:Az3OXXYGyfNwQNsK/31L4R75qFYnO641RZGAoV3uH1c=
 github.com/aws/smithy-go v1.13.5 h1:hgz0X/DX0dGqTYpGALqXJoRKRj5oQ7150i5FdTePzO8=
 github.com/aws/smithy-go v1.13.5/go.mod h1:Tg+OJXh4MB2R/uN61Ko2f6hTZwB/ZYGOtib8J3gBHzA=
+github.com/chrismarget-j/apstra-ami-builder/functions/cloudinit/src v0.0.0-20221213200527-eededb79b0f8 h1:K8lsVMuJ5JMmo/NPvQJ8d6rWUxA0jIaA7mTxUol+vB8=
+github.com/chrismarget-j/apstra-ami-builder/functions/cloudinit/src v0.0.0-20221213200527-eededb79b0f8/go.mod h1:TvQJEmaC/JDquniJhsSx2F6O1wTw/R/DWUrxIYeUQpU=
+github.com/chrismarget-j/apstra-ami-builder/functions/cloudinit/src v0.0.0-20221213200633-c2584a5c0c34 h1:rwfAAtXJC82LY+8PEy3Sh7YQchn1p0WB0G2s0dV+jIw=
+github.com/chrismarget-j/apstra-ami-builder/functions/cloudinit/src v0.0.0-20221213200633-c2584a5c0c34/go.mod h1:TvQJEmaC/JDquniJhsSx2F6O1wTw/R/DWUrxIYeUQpU=
+github.com/chrismarget-j/apstra-ami-builder/functions/cloudinit/src v0.0.0-20221213202729-42e76dc0b1de h1:BGt50ORzItlSLYE1sFvq2IbT6WJRfbVKXOog7QJlybM=
+github.com/chrismarget-j/apstra-ami-builder/functions/cloudinit/src v0.0.0-20221213202729-42e76dc0b1de/go.mod h1:TvQJEmaC/JDquniJhsSx2F6O1wTw/R/DWUrxIYeUQpU=
+github.com/chrismarget-j/apstra-ami-builder/functions/cloudinit/src v0.0.0-20221213202951-6a474ebee4ea h1:kXhdfXngQajpfTInnXq/840ihzGiD3AoAwpszZ5z9IU=
+github.com/chrismarget-j/apstra-ami-builder/functions/cloudinit/src v0.0.0-20221213202951-6a474ebee4ea/go.mod h1:TvQJEmaC/JDquniJhsSx2F6O1wTw/R/DWUrxIYeUQpU=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=
 github.com/google/go-cmp v0.5.8 h1:e6P7q2lk1O+qJJb4BtCQXlK8vWEO8V1ZeuEdJNOqZyg=

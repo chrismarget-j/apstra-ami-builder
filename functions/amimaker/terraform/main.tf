@@ -38,8 +38,8 @@ resource "aws_iam_role_policy" "ours" {
         ]
       },
       {
-        Effect   = "Allow",
-        Action   = [
+        Effect = "Allow",
+        Action = [
           "ec2:CreateTags",
         ]
         Resource = [
@@ -47,12 +47,13 @@ resource "aws_iam_role_policy" "ours" {
         ]
       },
       {
-        Effect   = "Allow",
-        Action   = [
+        Effect = "Allow",
+        Action = [
           "ec2:CreateTags",
           "ec2:DescribeImportSnapshotTasks",
           "eC2:DescribeInstances",
           "eC2:RunInstances",
+          "ec2:TerminateInstances"
         ]
         Resource = [
           "*",
@@ -63,6 +64,9 @@ resource "aws_iam_role_policy" "ours" {
         Action = [
           "ec2:CreateTags",
           "ec2:RegisterImage",
+          "ec2:DeregisterImage",
+          "ec2:CreateSnapshot",
+          "ec2:DeleteSnapshot",
         ]
         Resource = [
           "arn:${local.partition}:ec2:${local.region}::snapshot/*",
@@ -86,6 +90,19 @@ resource "aws_iam_role_policy" "ours" {
           "lambda:InvokeFunction"
         ]
         Resource = "arn:${local.partition}:lambda:${local.region}:${local.account}:function:${var.install_ci_lambda_name}"
+      },
+      {
+        Effect = "Allow",
+        Action = "ec2:CreateSnapshot",
+        Resource = [
+          "arn:${local.partition}:ec2:${local.region}::snapshot/*",
+          "arn:${local.partition}:ec2:${local.region}:${local.account}:volume/*",
+        ]
+      },
+      {
+        Effect = "Allow",
+        Action = "ec2:DescribeSnapshots"
+        Resource = "*"
       }
     ]
   })
@@ -102,31 +119,22 @@ resource "aws_security_group" "ours" {
   vpc_id      = data.aws_vpc.ours.id
 }
 
-resource "aws_security_group_rule" "local_ssh" {
+resource "aws_security_group_rule" "ssh_from_default_sg" {
+  security_group_id        = aws_security_group.ours.id
+  type                     = "ingress"
+  from_port                = 22
+  to_port                  = 22
+  protocol                 = "tcp"
+  source_security_group_id = data.aws_security_group.default.id
+}
+
+resource "aws_security_group_rule" "temp_my_ssh_sessions" {
   security_group_id = aws_security_group.ours.id
   type              = "ingress"
   from_port         = 22
   to_port           = 22
   protocol          = "tcp"
-  self              = true
-}
-
-resource "aws_security_group_rule" "all_ping" {
-  security_group_id = aws_security_group.ours.id
-  type              = "ingress"
-  from_port         = -1
-  to_port           = -1
-  protocol          = "icmp"
-  cidr_blocks = ["0.0.0.0/0"]
-}
-
-resource "aws_security_group_rule" "inbound_from_home" {
-  security_group_id = aws_security_group.ours.id
-  type              = "ingress"
-  from_port         = 22
-  to_port           = 22
-  protocol          = "tcp"
-  cidr_blocks       = ["47.14.45.97/32"]
+  cidr_blocks       = ["${data.external.current_ip.result.ip}/32"]
 }
 
 resource "aws_security_group_rule" "outbound" {
@@ -135,7 +143,7 @@ resource "aws_security_group_rule" "outbound" {
   from_port         = 0
   to_port           = 0
   protocol          = "-1"
-  self              = true
+  cidr_blocks       = ["0.0.0.0/0"]
 }
 
 resource "aws_lambda_function" "ours" {
@@ -144,12 +152,12 @@ resource "aws_lambda_function" "ours" {
   role          = aws_iam_role.ours.arn
   runtime       = "go1.x"
   filename      = data.archive_file.zipped_for_lambda.output_path
-  timeout       = 300
+  timeout       = 360
   environment {
     variables = {
-      INSTALL_CI_LAMBDA_NAME = var.install_ci_lambda_name
+      INSTALL_CI_LAMBDA_NAME           = var.install_ci_lambda_name
       INSTALL_CI_LAMBDA_SECURITY_GROUP = aws_security_group.ours.id
-      INSTANCE_TYPE = var.temp_instance_type
+      INSTANCE_TYPE                    = var.temp_instance_type
     }
   }
   lifecycle {

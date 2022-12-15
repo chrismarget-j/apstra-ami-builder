@@ -12,7 +12,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
 	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
-	//"github.com/chrismarget-j/apstra-ami-builder/functions/cloudinit"
+	cloudinit "github.com/chrismarget-j/apstra-ami-builder/functions/cloudinit/src"
 	"log"
 	"math/rand"
 	"os"
@@ -25,16 +25,25 @@ const (
 	expectedResult = "succeeded"
 
 	msgIgnoreEvent = "ignoring un-interesting event"
-	msgSuccess     = "clean exit"
+	msgSuccess     = "clean exit AMI is '%s'"
+
+	cloudInitTagKey = "cloud-init"
+	truthyString    = "true"
 
 	envVarInstallCiLambdaName        = "INSTALL_CI_LAMBDA_NAME"
 	envVarInstallCiLambdaSG          = "INSTALL_CI_LAMBDA_SECURITY_GROUP"
 	envVarInstanceType               = "INSTANCE_TYPE"
 	envVarRetainIntermediateSnapshot = "KEEP_INTERMEDIATE_SNAPSHOT"
 	envVarRetainIntermediateAmi      = "KEEP_INTERMEDIATE_AMI"
+	envVarRetainIntermediateInstance = "KEEP_INTERMEDIATE_INSTANCE"
 
-	ec2InstanceIterationWait = 500 * time.Millisecond
-	ec2InstanceIterationsMax = 30
+	ec2InstanceBootWaitInterval = 45 * time.Second
+	ec2InstanceIterationWait    = 500 * time.Millisecond
+	ec2InstanceIterationsMax    = 30
+	ec2SnapshotIterationWait    = 500 * time.Millisecond
+	ec2SnapshotIterationsMax    = 120
+
+	dyingBreathInterval = 5 * time.Second
 )
 
 type Request struct {
@@ -62,18 +71,25 @@ type Request struct {
 type Response struct {
 	Message string `json:"message,omitempty"`
 	Error   string `json:"error,omitempty"`
+	AmiId   string `json:"ami_id,omitempty"`
 }
 
 func HandleRequest(ctx context.Context, request *Request) (*Response, error) {
+	reqDump, err := json.Marshal(request)
+	if err != nil {
+		return nil, fmt.Errorf("error unmarshaling request - %w", err)
+	}
+	log.Printf("request received: '%s'", string(reqDump))
+
+	if deadline, ok := ctx.Deadline(); ok {
+		fmt.Printf("context deadline found: '%s' (%s)\n", deadline, time.Now().Sub(deadline))
+	} else {
+		fmt.Println("no context deadline")
+	}
+
 	h, err := newHandler(ctx, request)
 	if err != nil {
 		err = fmt.Errorf("error creating new handler - %w", err)
-		return &Response{Error: err.Error()}, err
-	}
-
-	err = h.testNextStage(ctx)
-	if err != nil {
-		err = fmt.Errorf("error testing next lambda - %w", err)
 		return &Response{Error: err.Error()}, err
 	}
 
@@ -81,11 +97,17 @@ func HandleRequest(ctx context.Context, request *Request) (*Response, error) {
 	if err != nil {
 		var hErr handlerErr
 		if errors.As(err, &hErr) && hErr.Type() == errFilterFail {
-			log.Printf("filter says nope")
+			log.Printf("filter says nope to this event")
 			return &Response{Message: msgIgnoreEvent}, nil
 		}
 		log.Printf("some other error: '%s'", err.Error())
 		err = fmt.Errorf("error filtering incoming event - %w", err)
+		return &Response{Error: err.Error()}, err
+	}
+
+	err = h.testNextStage(ctx)
+	if err != nil {
+		err = fmt.Errorf("error testing next lambda - %w", err)
 		return &Response{Error: err.Error()}, err
 	}
 
@@ -110,8 +132,8 @@ func HandleRequest(ctx context.Context, request *Request) (*Response, error) {
 		err = fmt.Errorf("error tagging snapshot - %w", err)
 		return &Response{Error: err.Error()}, err
 	}
-	dump, _ := json.Marshal(h.task.Tags)
-	log.Printf("snapshot '%s' tagged: '%s'", h.snapshot, string(dump))
+	dump, _ := json.Marshal(h.tags)
+	log.Printf("snapshot '%s' tagged: '%s'", h.snapshotId, string(dump))
 
 	err = h.makeTempAmi(ctx)
 	if err != nil {
@@ -120,30 +142,53 @@ func HandleRequest(ctx context.Context, request *Request) (*Response, error) {
 	}
 	log.Printf("temporary AMI '%s' created", h.tempAmiId)
 
-	id, err := h.bootTempAmi(ctx)
+	err = h.boot(ctx)
 	if err != nil {
 		err = fmt.Errorf("error starting temporary instance from AMI - %w", err)
 		return &Response{Error: err.Error()}, err
 	}
+	log.Printf("launched instance '%s', waiting for private IP to appear...", h.tempInstanceId)
 
-	ip, err := h.waitPublicIp(ctx, id)
+	deathwatch := h.deathbedTerminateInstance(ctx)
+
+	ip, err := h.waitPrivateIp(ctx)
 	if err != nil {
-		err = fmt.Errorf("error waiting for ec2 public IP - %w", err)
+		return h.terminateInstance(ctx, err)
+	}
+	log.Printf("private ip: '%s'", *ip)
+
+	log.Printf("invoking '%s' in %s", h.installCiLambdaName, ec2InstanceBootWaitInterval)
+	time.Sleep(ec2InstanceBootWaitInterval)
+
+	log.Printf("invoking '%s' now", h.installCiLambdaName)
+	err = h.invokeNextStage(ctx, ip)
+	if err != nil {
+		return h.terminateInstance(ctx, err)
+	}
+
+	err = h.waitUntilStopped(ctx)
+	if err != nil {
+		close(deathwatch)
+		return h.terminateInstance(ctx, err)
+	}
+	close(deathwatch)
+	log.Printf("instance '%s' stopped.", h.tempInstanceId)
+
+	h.setCiTagTrue()
+
+	amiId, err := h.makeFinalAmi(ctx)
+	if err != nil {
+		err = fmt.Errorf("error while making final AMI - %w", err)
 		return &Response{Error: err.Error()}, err
 	}
-	log.Printf("public ip: '%s'", *ip)
 
-	err = h.waitUntilStopped(ctx, id)
+	err = h.cleanup(ctx)
 	if err != nil {
-		_, _ = h.ec2Client.TerminateInstances(ctx, &ec2.TerminateInstancesInput{InstanceIds: []string{*id}})
-		err = fmt.Errorf("error waiting for instance to stop - %w", err)
-		return &Response{
-			Message: fmt.Sprintf("terminating instance '%s'", *id),
-			Error:   err.Error(),
-		}, err
+		err = fmt.Errorf("error in cleanup - %w", err)
+		return &Response{Error: err.Error()}, err
 	}
 
-	return &Response{Message: msgSuccess}, nil
+	return &Response{Message: msgSuccess, AmiId: *amiId}, nil
 }
 
 func newHandler(ctx context.Context, request *Request) (*handler, error) {
@@ -166,19 +211,12 @@ func newHandler(ctx context.Context, request *Request) (*handler, error) {
 		return nil, errors.New("nil request")
 	}
 
-	dump, err := json.Marshal(request)
-	if err != nil {
-		return nil, fmt.Errorf("error unmarshaling request - %w", err)
-	}
-
-	log.Printf("request received: '%s'", string(dump))
-
 	awsCfg, err := config.LoadDefaultConfig(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("error loading default AWS config - %w", err)
 	}
 
-	snapshot, err := arn.Parse(request.Detail.SnapshotId)
+	snapshotArn, err := arn.Parse(request.Detail.SnapshotId)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing snapshot arn ('%s') found in request - %w", request.Detail.SnapshotId, err)
 	}
@@ -187,12 +225,13 @@ func newHandler(ctx context.Context, request *Request) (*handler, error) {
 		ec2Client:            ec2.NewFromConfig(awsCfg),
 		lambdaClient:         lambda.NewFromConfig(awsCfg),
 		request:              request,
-		snapshot:             snapshot,
+		snapshotId:           path.Base(snapshotArn.Resource),
 		installCiSecurityGrp: securityGroup,
 		installCiLambdaName:  installCiLambda,
 		instanceType:         instanceType,
-		keepAmi:              os.Getenv(envVarRetainIntermediateAmi) == "true",
-		keepSnapshot:         os.Getenv(envVarRetainIntermediateSnapshot) == "true",
+		keepAmi:              os.Getenv(envVarRetainIntermediateAmi) == truthyString,
+		keepSnapshot:         os.Getenv(envVarRetainIntermediateSnapshot) == truthyString,
+		keepInstance:         os.Getenv(envVarRetainIntermediateInstance) == truthyString,
 	}, nil
 }
 
@@ -201,14 +240,17 @@ type handler struct {
 	ec2Client            *ec2.Client
 	lambdaClient         *lambda.Client
 	task                 *types.ImportSnapshotTask
-	snapshot             arn.ARN
+	snapshotId           string
 	tempAmiId            string
+	tempInstanceId       string
 	name                 string
 	instanceType         string
 	installCiLambdaName  string
 	installCiSecurityGrp string
 	keepSnapshot         bool
 	keepAmi              bool
+	keepInstance         bool
+	tags                 []types.Tag
 }
 
 func (o *handler) filterEvents() error {
@@ -232,14 +274,7 @@ func (o *handler) filterEvents() error {
 }
 
 func (o *handler) findImportTask(ctx context.Context) error {
-	params := &ec2.DescribeImportSnapshotTasksInput{
-		DryRun:        nil,
-		Filters:       nil,
-		ImportTaskIds: nil,
-		MaxResults:    nil,
-		NextToken:     nil,
-	}
-	paginator := ec2.NewDescribeImportSnapshotTasksPaginator(o.ec2Client, params)
+	paginator := ec2.NewDescribeImportSnapshotTasksPaginator(o.ec2Client, nil)
 
 pageLoop:
 	for paginator.HasMorePages() {
@@ -252,8 +287,9 @@ pageLoop:
 			if task.SnapshotTaskDetail == nil || task.SnapshotTaskDetail.SnapshotId == nil {
 				continue taskLoop
 			}
-			if *task.SnapshotTaskDetail.SnapshotId == path.Base(o.snapshot.Resource) {
+			if *task.SnapshotTaskDetail.SnapshotId == o.snapshotId {
 				o.task = &task
+				o.tags = task.Tags
 				break pageLoop
 			}
 		}
@@ -267,8 +303,8 @@ func (o *handler) tagSnapshot(ctx context.Context) error {
 	}
 
 	_, err := o.ec2Client.CreateTags(ctx, &ec2.CreateTagsInput{
-		Resources: []string{path.Base(o.snapshot.String())},
-		Tags:      o.task.Tags,
+		Resources: []string{o.snapshotId},
+		Tags:      o.tags,
 	})
 	if err != nil {
 		return fmt.Errorf("error copying tags from snapshot import task to snapshot - %w", err)
@@ -283,22 +319,22 @@ func (o *handler) makeTempAmi(ctx context.Context) error {
 	}
 
 	rii := &ec2.RegisterImageInput{
-		Name:         aws.String(nameFromTagsOrRandom(o.task.Tags) + "-" + randString(6)),
-		Architecture: "x86_64",
+		Name:         aws.String(nameFromTagsOrRandom(o.tags) + "-" + randString(6)),
+		Architecture: types.ArchitectureValues(types.ArchitectureTypeX8664),
 		BlockDeviceMappings: []types.BlockDeviceMapping{{
 			DeviceName: aws.String("/dev/sda1"),
 			Ebs: &types.EbsBlockDevice{
 				DeleteOnTermination: aws.Bool(true),
-				SnapshotId:          aws.String(path.Base(o.snapshot.Resource)),
-				VolumeType:          "gp2",
+				SnapshotId:          aws.String(o.snapshotId),
+				VolumeType:          types.VolumeTypeGp2,
 			},
 		}},
 		Description:        aws.String("scratchpad AMI for cloud-init installation"),
 		EnaSupport:         aws.Bool(true),
-		ImdsSupport:        "v2.0",
+		ImdsSupport:        types.ImdsSupportValuesV20,
 		RootDeviceName:     aws.String("/dev/sda1"),
 		SriovNetSupport:    nil,
-		VirtualizationType: aws.String("hvm"),
+		VirtualizationType: aws.String(string(types.VirtualizationTypeHvm)),
 	}
 
 	rio, err := o.ec2Client.RegisterImage(ctx, rii)
@@ -316,13 +352,13 @@ func (o *handler) makeTempAmi(ctx context.Context) error {
 
 	_, err = o.ec2Client.CreateTags(ctx, &ec2.CreateTagsInput{
 		Resources: []string{path.Base(o.tempAmiId)},
-		Tags:      o.task.Tags,
+		Tags:      o.tags,
 	})
 
 	return nil
 }
 
-func (o *handler) bootTempAmi(ctx context.Context) (*string, error) {
+func (o *handler) boot(ctx context.Context) error {
 	rii := &ec2.RunInstancesInput{
 		MaxCount:                          aws.Int32(1),
 		MinCount:                          aws.Int32(1),
@@ -332,51 +368,51 @@ func (o *handler) bootTempAmi(ctx context.Context) (*string, error) {
 		SecurityGroupIds:                  []string{o.installCiSecurityGrp},
 		TagSpecifications: []types.TagSpecification{{
 			ResourceType: types.ResourceTypeInstance,
-			Tags:         o.task.Tags,
+			Tags:         o.tags,
 		}},
 	}
 	rio, err := o.ec2Client.RunInstances(ctx, rii)
 	if err != nil {
-		return nil, fmt.Errorf("error running temporary EC2 instance for cloud-init installation - %w", err)
+		return fmt.Errorf("error running temporary EC2 instance for cloud-init installation - %w", err)
 	}
 	if len(rio.Instances) != 1 {
 		dump, _ := json.Marshal(rio)
-		return nil, fmt.Errorf("expected to start 1 instance, got %d instances - full output - %s", len(rio.Instances), string(dump))
+		return fmt.Errorf("expected to start 1 instance, got %d instances - full output - %s", len(rio.Instances), string(dump))
 	}
-	log.Printf("launched instance '%s', waiting for public IP to appear...", *rio.Instances[0].InstanceId)
+	o.tempInstanceId = *rio.Instances[0].InstanceId
 
-	return rio.Instances[0].InstanceId, nil
+	return nil
 }
 
-func (o *handler) getPublicIp(ctx context.Context, id *string) (*string, error) {
+func (o *handler) getPrivateIp(ctx context.Context, id string) (*string, error) {
 	instance, err := o.getInstance(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("error getting instance while determining public IP - %w", err)
+		return nil, fmt.Errorf("error getting instance while determining private IP - %w", err)
 	}
-	return instance.PublicIpAddress, nil
+	return instance.PrivateIpAddress, nil
 }
 
-func (o *handler) waitPublicIp(ctx context.Context, id *string) (*string, error) {
+func (o *handler) waitPrivateIp(ctx context.Context) (*string, error) {
 	var i int
 	for i < ec2InstanceIterationsMax {
 		i++
-		ip, err := o.getPublicIp(ctx, id)
+		ip, err := o.getPrivateIp(ctx, o.tempInstanceId)
 		if err != nil {
-			return nil, fmt.Errorf("error while waiting for public IP - %w", err)
+			return nil, fmt.Errorf("error while waiting for private IP - %w", err)
 		}
 		if ip != nil {
 			return ip, nil
 		}
 		time.Sleep(ec2InstanceIterationWait)
 	}
-	return nil, fmt.Errorf("timeout waiting for public IP to appear on '%s'", *id)
+	return nil, fmt.Errorf("timeout waiting for private IP to appear on '%s'", o.tempInstanceId)
 }
 
-func (o *handler) waitUntilStopped(ctx context.Context, id *string) error {
-	log.Printf("waiting for instance '%s' to stop...", *id)
+func (o *handler) waitUntilStopped(ctx context.Context) error {
+	log.Printf("waiting for instance '%s' to stop...", o.tempInstanceId)
 	var i int
 	for i < ec2InstanceIterationsMax {
-		instance, err := o.getInstance(ctx, id)
+		instance, err := o.getInstance(ctx, o.tempInstanceId)
 		if err != nil {
 			return fmt.Errorf("error getting instance state while waiting for it to stop")
 		}
@@ -385,12 +421,12 @@ func (o *handler) waitUntilStopped(ctx context.Context, id *string) error {
 		}
 		time.Sleep(ec2InstanceIterationWait)
 	}
-	return fmt.Errorf("instance '%s' didn't stop in the alotted time", *id)
+	return fmt.Errorf("instance '%s' didn't stop in the alotted time", o.tempInstanceId)
 }
 
-func (o *handler) getInstance(ctx context.Context, id *string) (*types.Instance, error) {
+func (o *handler) getInstance(ctx context.Context, id string) (*types.Instance, error) {
 	params := &ec2.DescribeInstancesInput{
-		InstanceIds: []string{*id},
+		InstanceIds: []string{id},
 	}
 	paginator := ec2.NewDescribeInstancesPaginator(o.ec2Client, params)
 	for paginator.HasMorePages() {
@@ -414,22 +450,271 @@ func (o *handler) getInstance(ctx context.Context, id *string) (*types.Instance,
 }
 
 func (o *handler) testNextStage(ctx context.Context) error {
-	//json.Marshal(&cloudinit.Request{Oper})
+	payload, err := json.Marshal(&cloudinit.Request{Operation: cloudinit.MessagePing})
+	if err != nil {
+		return fmt.Errorf("error marshaling next lambda's request - %w", err)
+	}
 
 	ii := &lambda.InvokeInput{
-		FunctionName:   aws.String(o.installCiLambdaName),
-		ClientContext:  nil,
-		InvocationType: "",
-		LogType:        "",
-		Payload:        []byte("{\"operation\": \"ping\"}"),
-		Qualifier:      nil,
+		FunctionName: aws.String(o.installCiLambdaName),
+		Payload:      payload,
 	}
 	io, err := o.lambdaClient.Invoke(ctx, ii)
 	if err != nil {
 		return fmt.Errorf("error invoking '%s' lambda - %w", o.installCiLambdaName, err)
 	}
-	log.Printf(string(io.Payload))
+
+	ciResponse := &cloudinit.Response{}
+	err = json.Unmarshal(io.Payload, ciResponse)
+	if err != nil {
+		return fmt.Errorf("error unmarshaling next lambda's reply - %w", err)
+	}
+	if ciResponse.Error != "" {
+		return fmt.Errorf("next lambda returned an error - %s", ciResponse.Error)
+	}
+	if ciResponse.Message != cloudinit.MessagePong {
+		return fmt.Errorf("next lambda didn't say '%s'", cloudinit.MessagePong)
+	}
+
+	log.Printf("next lambda is ready to go!")
 	return nil
+}
+
+func (o *handler) invokeNextStage(ctx context.Context, ip *string) error {
+	payload, err := json.Marshal(&cloudinit.Request{
+		Operation:  cloudinit.OperationInstall,
+		InstanceIp: *ip,
+	})
+	if err != nil {
+		return fmt.Errorf("error marshaling next lambda's request - %w", err)
+	}
+
+	ii := &lambda.InvokeInput{
+		FunctionName: aws.String(o.installCiLambdaName),
+		Payload:      payload,
+	}
+	io, err := o.lambdaClient.Invoke(ctx, ii)
+	if err != nil {
+		return fmt.Errorf("error invoking '%s' lambda - %w", o.installCiLambdaName, err)
+	}
+
+	ciResponse := &cloudinit.Response{}
+	err = json.Unmarshal(io.Payload, ciResponse)
+	if err != nil {
+		return fmt.Errorf("error unmarshaling reply from '%s' - %w", o.installCiLambdaName, err)
+	}
+	if ciResponse.Error != "" {
+		return fmt.Errorf("'%s' returned an error - %s", o.installCiLambdaName, ciResponse.Error)
+	}
+	if ciResponse.Message != cloudinit.MessageSuccess {
+		return fmt.Errorf("unexpected reply from '%s' - %s", o.installCiLambdaName, string(io.Payload))
+	}
+
+	log.Printf("'%s' said: '%s'", o.installCiLambdaName, string(io.Payload))
+	return nil
+}
+
+func (o *handler) deathbedTerminateInstance(ctx context.Context) chan error {
+	ch := make(chan error, 1)
+
+	go func() {
+		deadline, ok := ctx.Deadline() // this deadline is the lambda execution limit
+		if !ok {
+			log.Println("execution context never expires, not doing deathbed instance termination")
+			return
+		}
+
+		triggerDyingGasp := time.After(deadline.Add(-dyingBreathInterval).Sub(time.Now()))
+		select {
+		case <-triggerDyingGasp: // time's up! terminate the instance
+			log.Printf("terminating instance '%s' while on our deathbed so it doesn't run forever", o.tempInstanceId)
+			tii := &ec2.TerminateInstancesInput{InstanceIds: []string{o.tempInstanceId}}
+			_, err := o.ec2Client.TerminateInstances(ctx, tii)
+			if err != nil {
+				log.Fatal(fmt.Sprintf("error while terminating instance - %s", err.Error()))
+			}
+		case <-ch: // channel closure means we don't have to terminate the instance
+			log.Println("normal instance termination, deathbed drama averted.")
+		}
+	}()
+
+	return ch
+}
+
+func (o *handler) setCiTagTrue() {
+	for i, tag := range o.tags {
+		if *tag.Key == cloudInitTagKey {
+			o.tags[i].Value = aws.String(fmt.Sprintf("%t", true))
+		}
+		return
+	}
+	o.tags = append(o.tags, types.Tag{
+		Key:   aws.String(cloudInitTagKey),
+		Value: aws.String(fmt.Sprintf("%t", true)),
+	})
+}
+
+func (o *handler) makeFinalAmi(ctx context.Context) (*string, error) {
+	dii := &ec2.DescribeInstancesInput{InstanceIds: []string{o.tempInstanceId}}
+	dio, err := o.ec2Client.DescribeInstances(ctx, dii)
+	if err != nil {
+		return nil, fmt.Errorf("error describing stopped instance '%s' - %w", o.tempInstanceId, err)
+	}
+	if len(dio.Reservations) != 1 {
+		return nil, fmt.Errorf("expected 1 reservation, describe instances found %d reservations", len(dio.Reservations))
+	}
+	r := dio.Reservations[0]
+	if len(r.Instances) != 1 {
+		return nil, fmt.Errorf("expected 1 instance, describe instances found %d instances", len(r.Instances))
+	}
+	i := r.Instances[0]
+	if len(i.BlockDeviceMappings) != 1 {
+		return nil, fmt.Errorf("expected 1 block device mapping, describe instances found %d block device mappings", len(i.BlockDeviceMappings))
+	}
+	m := i.BlockDeviceMappings[0]
+
+	csi := &ec2.CreateSnapshotInput{
+		VolumeId:    m.Ebs.VolumeId,
+		Description: aws.String(fmt.Sprintf("Apstra server with cloud-init")),
+		TagSpecifications: []types.TagSpecification{{
+			ResourceType: types.ResourceTypeSnapshot,
+			Tags:         o.tags,
+		}},
+	}
+	cso, err := o.ec2Client.CreateSnapshot(ctx, csi)
+	if err != nil {
+		return nil, fmt.Errorf("error creating snapshot from instance '%s' - %w", o.tempInstanceId, err)
+	}
+
+	err = o.waitSnapshotComplete(ctx, cso.SnapshotId)
+	if err != nil {
+		return nil, fmt.Errorf("error checking for snapshot completion - %w", err)
+	}
+
+	rii := &ec2.RegisterImageInput{
+		Name:         aws.String(nameFromTagsOrRandom(o.tags) + "-" + randString(6)),
+		Architecture: types.ArchitectureValues(types.ArchitectureTypeX8664),
+		BlockDeviceMappings: []types.BlockDeviceMapping{{
+			DeviceName: aws.String("/dev/sda1"),
+			Ebs: &types.EbsBlockDevice{
+				DeleteOnTermination: aws.Bool(true),
+				SnapshotId:          cso.SnapshotId,
+				VolumeType:          types.VolumeTypeGp2,
+			},
+		}},
+		Description:        aws.String("Apstra with cloud-init"),
+		EnaSupport:         aws.Bool(true),
+		ImdsSupport:        types.ImdsSupportValuesV20,
+		RootDeviceName:     aws.String("/dev/sda1"),
+		VirtualizationType: aws.String(string(types.VirtualizationTypeHvm)),
+	}
+	rio, err := o.ec2Client.RegisterImage(ctx, rii)
+	if err != nil {
+		return nil, fmt.Errorf("error importing snapshot - %w", err)
+	}
+	if rio == nil {
+		return nil, errors.New("nil return from registerImage")
+	}
+	if rio.ImageId == nil {
+		return nil, errors.New("nil ImageId return from registerImage")
+	}
+
+	_, err = o.ec2Client.CreateTags(ctx, &ec2.CreateTagsInput{
+		Resources: []string{*rio.ImageId},
+		Tags:      o.tags,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("error while setting tags on new AMI '%s' - %w", *rio.ImageId, err)
+	}
+
+	log.Printf("new AMI with cloud-init is '%s'", *rio.ImageId)
+
+	return rio.ImageId, nil
+}
+
+func (o *handler) terminateInstance(ctx context.Context, err1 error) (*Response, error) {
+	tii := &ec2.TerminateInstancesInput{InstanceIds: []string{o.tempInstanceId}}
+	_, err2 := o.ec2Client.TerminateInstances(ctx, tii)
+	if err2 != nil {
+		return &Response{
+			Message: fmt.Sprintf("termination of instance '%s' seems to have failed - please check it - %s", o.tempInstanceId, err2.Error()),
+			Error:   err1.Error(),
+		}, err1
+	}
+
+	return &Response{Error: err1.Error()}, err1
+}
+
+func (o *handler) waitSnapshotComplete(ctx context.Context, snapshotId *string) error {
+	log.Printf("waiting for snapshot '%s' completion", *snapshotId)
+	dsi := &ec2.DescribeSnapshotsInput{
+		SnapshotIds: []string{*snapshotId},
+	}
+
+	var dso *ec2.DescribeSnapshotsOutput
+	var err error
+	var i int
+	for i < ec2SnapshotIterationsMax {
+		i++
+		dso, err = o.ec2Client.DescribeSnapshots(ctx, dsi)
+		if err != nil {
+			return fmt.Errorf("error getting description of snapshot '%s' - %w", *snapshotId, err)
+		}
+
+		if len(dso.Snapshots) != 1 {
+			return fmt.Errorf("expected 1 snapshot description, got %d descriptions", len(dso.Snapshots))
+		}
+
+		switch dso.Snapshots[0].State {
+		case types.SnapshotStateCompleted:
+			return nil
+		case types.SnapshotStatePending:
+			time.Sleep(ec2SnapshotIterationWait)
+			continue
+		default:
+			return fmt.Errorf("snapshot '%s' in unexpected state: '%s'", *snapshotId, dso.Snapshots[0].State)
+		}
+	}
+	return fmt.Errorf("timed out waiting for snapshot '%s' completion. Last state: '%s'", *snapshotId, dso.Snapshots[0].State)
+}
+
+func (o *handler) cleanup(ctx context.Context) error {
+	var err, iErr, sErr, aErr error
+	if !o.keepInstance {
+		_, iErr = o.ec2Client.TerminateInstances(ctx, &ec2.TerminateInstancesInput{InstanceIds: []string{o.tempInstanceId}})
+	}
+	if iErr != nil {
+		err = fmt.Errorf("error terminating temporary instance: %w", iErr)
+	}
+
+	if !o.keepAmi {
+		_, aErr = o.ec2Client.DeregisterImage(ctx, &ec2.DeregisterImageInput{
+			ImageId: aws.String(o.tempAmiId),
+		})
+	}
+	if aErr != nil {
+		if err != nil {
+			err = fmt.Errorf("%s - error deregistering temporary AMI - %w", err, aErr)
+		} else {
+			err = fmt.Errorf("error deregistering temporary AMI - %w", aErr)
+		}
+	}
+
+	if !o.keepSnapshot {
+		_, sErr = o.ec2Client.DeleteSnapshot(ctx, &ec2.DeleteSnapshotInput{
+			SnapshotId: aws.String(o.snapshotId),
+			DryRun:     nil,
+		})
+	}
+	if sErr != nil {
+		if err != nil {
+			err = fmt.Errorf("%s - error deleting temporary snapshot - %w", err, sErr)
+		} else {
+			err = fmt.Errorf("error deleting temporary snapshot - %w", sErr)
+		}
+	}
+
+	return err
 }
 
 func nameFromTagsOrRandom(tags []types.Tag) string {

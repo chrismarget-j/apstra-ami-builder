@@ -17,3 +17,14 @@ data "aws_vpc" "ours" {
 data "aws_iam_policy" "aws_lambda_vpc_execution" {
   name = "AWSLambdaVPCAccessExecutionRole"
 }
+
+data "aws_subnets" "ours" {
+  filter {
+    name   = "vpc-id"
+    values = [data.aws_vpc.ours.id]
+  }
+}
+
+data "aws_security_group" "ours" {
+  name = "default"
+}
