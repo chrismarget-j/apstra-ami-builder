@@ -149,11 +149,24 @@ func HandleRequest(ctx context.Context, request *Request) (*Response, error) {
 	}
 	log.Printf("launched instance '%s', waiting for private IP to appear...", h.tempInstanceId)
 
-	deathwatch := h.deathbedTerminateInstance(ctx)
+	var cancel context.CancelFunc
+	var instanceCtx context.Context
+	if deadline, ok := ctx.Deadline(); ok {
+		instanceCtx, cancel = context.WithDeadline(ctx, deadline.Add(-dyingBreathInterval))
+		defer cancel()
+		h.deathbedTerminateInstance(ctx)
+	} else {
+		instanceCtx, cancel = context.WithCancel(ctx)
+		defer cancel()
+	}
 
-	ip, err := h.waitPrivateIp(ctx)
+	// todo delete these
+	d, _ := instanceCtx.Deadline()
+	fmt.Printf("context deadline is now: '%s' (%s)\n", d, time.Now().Sub(d))
+
+	ip, err := h.waitPrivateIp(instanceCtx)
 	if err != nil {
-		return h.terminateInstance(ctx, err)
+		return h.terminateInstance(ctx, err.Error(), true)
 	}
 	log.Printf("private ip: '%s'", *ip)
 
@@ -161,18 +174,17 @@ func HandleRequest(ctx context.Context, request *Request) (*Response, error) {
 	time.Sleep(ec2InstanceBootWaitInterval)
 
 	log.Printf("invoking '%s' now", h.installCiLambdaName)
-	err = h.invokeNextStage(ctx, ip)
+	err = h.invokeNextStage(instanceCtx, ip)
 	if err != nil {
-		return h.terminateInstance(ctx, err)
+		return h.terminateInstance(ctx, err.Error(), true)
 	}
 
-	err = h.waitUntilStopped(ctx)
+	err = h.waitUntilStopped(instanceCtx)
 	if err != nil {
-		close(deathwatch)
-		return h.terminateInstance(ctx, err)
+		return h.terminateInstance(ctx, err.Error(), true)
 	}
-	close(deathwatch)
 	log.Printf("instance '%s' stopped.", h.tempInstanceId)
+	cancel()
 
 	h.setCiTagTrue()
 
@@ -333,7 +345,6 @@ func (o *handler) makeTempAmi(ctx context.Context) error {
 		EnaSupport:         aws.Bool(true),
 		ImdsSupport:        types.ImdsSupportValuesV20,
 		RootDeviceName:     aws.String("/dev/sda1"),
-		SriovNetSupport:    nil,
 		VirtualizationType: aws.String(string(types.VirtualizationTypeHvm)),
 	}
 
@@ -514,31 +525,22 @@ func (o *handler) invokeNextStage(ctx context.Context, ip *string) error {
 	return nil
 }
 
-func (o *handler) deathbedTerminateInstance(ctx context.Context) chan error {
-	ch := make(chan error, 1)
-
+func (o *handler) deathbedTerminateInstance(ctx context.Context) {
 	go func() {
-		deadline, ok := ctx.Deadline() // this deadline is the lambda execution limit
-		if !ok {
-			log.Println("execution context never expires, not doing deathbed instance termination")
-			return
-		}
-
-		triggerDyingGasp := time.After(deadline.Add(-dyingBreathInterval).Sub(time.Now()))
 		select {
-		case <-triggerDyingGasp: // time's up! terminate the instance
-			log.Printf("terminating instance '%s' while on our deathbed so it doesn't run forever", o.tempInstanceId)
-			tii := &ec2.TerminateInstancesInput{InstanceIds: []string{o.tempInstanceId}}
-			_, err := o.ec2Client.TerminateInstances(ctx, tii)
+		case <-ctx.Done():
+			err := ctx.Err()
+			if err == context.Canceled {
+				return
+			}
+
+			log.Printf("terminating instance '%s' while on our deathbed because '%s'", o.tempInstanceId, err.Error())
+			_, err = o.terminateInstance(context.Background(), "", false)
 			if err != nil {
 				log.Fatal(fmt.Sprintf("error while terminating instance - %s", err.Error()))
 			}
-		case <-ch: // channel closure means we don't have to terminate the instance
-			log.Println("normal instance termination, deathbed drama averted.")
 		}
 	}()
-
-	return ch
 }
 
 func (o *handler) setCiTagTrue() {
@@ -632,17 +634,21 @@ func (o *handler) makeFinalAmi(ctx context.Context) (*string, error) {
 	return rio.ImageId, nil
 }
 
-func (o *handler) terminateInstance(ctx context.Context, err1 error) (*Response, error) {
+func (o *handler) terminateInstance(ctx context.Context, message string, messageIsErr bool) (*Response, error) {
 	tii := &ec2.TerminateInstancesInput{InstanceIds: []string{o.tempInstanceId}}
-	_, err2 := o.ec2Client.TerminateInstances(ctx, tii)
-	if err2 != nil {
+	_, err := o.ec2Client.TerminateInstances(ctx, tii)
+	if err != nil {
 		return &Response{
-			Message: fmt.Sprintf("termination of instance '%s' seems to have failed - please check it - %s", o.tempInstanceId, err2.Error()),
-			Error:   err1.Error(),
-		}, err1
+			Message: message,
+			Error:   fmt.Sprintf("termination of instance '%s' seems to have failed - please check it - %s", o.tempInstanceId, err.Error()),
+		}, err
 	}
 
-	return &Response{Error: err1.Error()}, err1
+	if messageIsErr {
+		return &Response{Error: message}, errors.New(message)
+	}
+
+	return &Response{Message: message}, nil
 }
 
 func (o *handler) waitSnapshotComplete(ctx context.Context, snapshotId *string) error {
