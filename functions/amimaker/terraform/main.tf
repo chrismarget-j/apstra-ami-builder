@@ -115,7 +115,7 @@ resource "aws_iam_role_policy_attachment" "aws_lambda_vpc_execution" {
 
 resource "aws_security_group" "ours" {
   name_prefix = local.prefix
-  description = "Used by temporary Apstra instances during AMI prep, and the lambdas which prep them"
+  description = "Used by temporary Apstra instances during AMI prep so that /${var.install_ci_lambda_name}/ (lambda running in the default SG) may connect via ssh."
   vpc_id      = data.aws_vpc.ours.id
 }
 
@@ -128,14 +128,14 @@ resource "aws_security_group_rule" "ssh_from_default_sg" {
   source_security_group_id = data.aws_security_group.default.id
 }
 
-resource "aws_security_group_rule" "temp_my_ssh_sessions" {
-  security_group_id = aws_security_group.ours.id
-  type              = "ingress"
-  from_port         = 22
-  to_port           = 22
-  protocol          = "tcp"
-  cidr_blocks       = ["${data.external.current_ip.result.ip}/32"]
-}
+#resource "aws_security_group_rule" "admin_ssh_for_debug" {
+#  security_group_id = aws_security_group.ours.id
+#  type              = "ingress"
+#  from_port         = 22
+#  to_port           = 22
+#  protocol          = "tcp"
+#  cidr_blocks       = ["${data.external.current_ip.result.ip}/32"]
+#}
 
 resource "aws_security_group_rule" "outbound" {
   security_group_id = aws_security_group.ours.id
