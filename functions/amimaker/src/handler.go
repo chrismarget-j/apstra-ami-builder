@@ -38,10 +38,7 @@ const (
 	envVarRetainIntermediateInstance = "KEEP_INTERMEDIATE_INSTANCE"
 
 	ec2InstanceBootWaitInterval = 45 * time.Second
-	ec2InstanceIterationWait    = 500 * time.Millisecond
-	ec2InstanceIterationsMax    = 30
-	ec2SnapshotIterationWait    = 500 * time.Millisecond
-	ec2SnapshotIterationsMax    = 300
+	apiIterationWait            = 250 * time.Millisecond
 
 	dyingBreathInterval = 5 * time.Second
 )
@@ -404,9 +401,7 @@ func (o *handler) getPrivateIp(ctx context.Context, id string) (*string, error) 
 }
 
 func (o *handler) waitPrivateIp(ctx context.Context) (*string, error) {
-	var i int
-	for i < ec2InstanceIterationsMax {
-		i++
+	for {
 		ip, err := o.getPrivateIp(ctx, o.tempInstanceId)
 		if err != nil {
 			return nil, fmt.Errorf("error while waiting for private IP - %w", err)
@@ -414,15 +409,13 @@ func (o *handler) waitPrivateIp(ctx context.Context) (*string, error) {
 		if ip != nil {
 			return ip, nil
 		}
-		time.Sleep(ec2InstanceIterationWait)
+		time.Sleep(apiIterationWait)
 	}
-	return nil, fmt.Errorf("timeout waiting for private IP to appear on '%s'", o.tempInstanceId)
 }
 
 func (o *handler) waitUntilStopped(ctx context.Context) error {
 	log.Printf("waiting for instance '%s' to stop...", o.tempInstanceId)
-	var i int
-	for i < ec2InstanceIterationsMax {
+	for {
 		instance, err := o.getInstance(ctx, o.tempInstanceId)
 		if err != nil {
 			return fmt.Errorf("error getting instance state while waiting for it to stop")
@@ -430,9 +423,8 @@ func (o *handler) waitUntilStopped(ctx context.Context) error {
 		if instance.State.Name == types.InstanceStateNameStopped {
 			return nil
 		}
-		time.Sleep(ec2InstanceIterationWait)
+		time.Sleep(apiIterationWait)
 	}
-	return fmt.Errorf("instance '%s' didn't stop in the alotted time", o.tempInstanceId)
 }
 
 func (o *handler) getInstance(ctx context.Context, id string) (*types.Instance, error) {
@@ -441,23 +433,21 @@ func (o *handler) getInstance(ctx context.Context, id string) (*types.Instance, 
 	}
 	paginator := ec2.NewDescribeInstancesPaginator(o.ec2Client, params)
 	for paginator.HasMorePages() {
-		var i int
 		var err error
 		var dio *ec2.DescribeInstancesOutput
-		for i < ec2InstanceIterationsMax {
-			i++
+		for {
 			dio, err = paginator.NextPage(ctx)
 			if err == nil {
 				break
 			}
-			time.Sleep(ec2InstanceIterationWait)
+			time.Sleep(apiIterationWait)
 		}
 		if err != nil {
 			return nil, fmt.Errorf("error getting instance descriptions from paginator - %w", err)
 		}
 		return &dio.Reservations[0].Instances[0], nil
 	}
-	return nil, fmt.Errorf("lone instance not found in first page of results")
+	return nil, fmt.Errorf("lone instance not found in paginator")
 }
 
 func (o *handler) testNextStage(ctx context.Context) error {
@@ -659,9 +649,7 @@ func (o *handler) waitSnapshotComplete(ctx context.Context, snapshotId *string) 
 
 	var dso *ec2.DescribeSnapshotsOutput
 	var err error
-	var i int
-	for i < ec2SnapshotIterationsMax {
-		i++
+	for {
 		dso, err = o.ec2Client.DescribeSnapshots(ctx, dsi)
 		if err != nil {
 			return fmt.Errorf("error getting description of snapshot '%s' - %w", *snapshotId, err)
@@ -675,13 +663,12 @@ func (o *handler) waitSnapshotComplete(ctx context.Context, snapshotId *string) 
 		case types.SnapshotStateCompleted:
 			return nil
 		case types.SnapshotStatePending:
-			time.Sleep(ec2SnapshotIterationWait)
+			time.Sleep(apiIterationWait)
 			continue
 		default:
 			return fmt.Errorf("snapshot '%s' in unexpected state: '%s'", *snapshotId, dso.Snapshots[0].State)
 		}
 	}
-	return fmt.Errorf("timed out waiting for snapshot '%s' completion. Last state: '%s'", *snapshotId, dso.Snapshots[0].State)
 }
 
 func (o *handler) cleanup(ctx context.Context) error {
