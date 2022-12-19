@@ -39,6 +39,8 @@ const (
 	cmdUpdate           = "apt-get update"
 	cmdInstallCloudInit = "apt-get install cloud-init --no-install-recommends -y"
 	cmdClearSshKeys     = "rm /etc/ssh/ssh_host_*"
+	cmdFirewallBlock    = "iptables -I INPUT 2 -i eth0 -j DROP"
+	cmdFirewallSave     = "netfilter-persistent save"
 	cmdPrintFlag        = "echo \"flag is %s\""
 	cmdShutdown         = "shutdown"
 )
@@ -204,6 +206,8 @@ func sessionCommand(flag string) string {
 		cmdUpdate,
 		cmdInstallCloudInit,
 		cmdClearSshKeys,
+		cmdFirewallBlock,
+		cmdFirewallSave,
 		fmt.Sprintf(cmdPrintFlag, flag),
 	}
 
