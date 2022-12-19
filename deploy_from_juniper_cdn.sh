@@ -129,3 +129,10 @@ echo "  Done."
 
 echo ""
 jq <<< $RESULT
+
+echo "check status with:"
+
+for task_id in $(jq -r '.task_ids | select (. != null) | .[]' <<< $RESULT)
+do
+  echo "  aws ec2 describe-import-snapshot-tasks --import-task-ids $task_id"
+done

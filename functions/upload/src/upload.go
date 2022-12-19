@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"log"
 
@@ -16,31 +15,39 @@ import (
 	"strings"
 )
 
-type FetchAndExtractRequest struct {
-	Url        string
-	Files      []S3ObjInfo
-	HttpClient *http.Client
-	BucketName string
+type fetchAndExtractRequest struct {
+	awsConfig  aws.Config
+	url        string
+	files      []S3ObjInfo
+	httpClient *http.Client
+	bucketName string
 }
 
-type FetchAndExtractResponse struct {
-	Etags map[string]string
+type fetchAndExtractResponse struct {
+	items []fetchAndExtractResponseItem
 }
 
-func (o FetchAndExtractRequest) validate() error {
-	if o.Url == "" {
+type fetchAndExtractResponseItem struct {
+	eTag     string
+	s3bucket string
+	s3key    string
+	tags     []Tag
+}
+
+func (o fetchAndExtractRequest) validate() error {
+	if o.url == "" {
 		return errors.New("validation error: url cannot be empty")
 	}
-	if _, err := url.Parse(o.Url); err != nil {
+	if _, err := url.Parse(o.url); err != nil {
 		return fmt.Errorf("validation error parsing url - %w", err)
 	}
-	if len(o.Files) == 0 {
+	if len(o.files) == 0 {
 		return errors.New("validation error: no files requested for extraction")
 	}
 
-	dstMap := make(map[string]struct{}, len(o.Files))
-	srcMap := make(map[string]struct{}, len(o.Files))
-	for _, s3ObjInfo := range o.Files {
+	dstMap := make(map[string]struct{}, len(o.files))
+	srcMap := make(map[string]struct{}, len(o.files))
+	for _, s3ObjInfo := range o.files {
 		if s3ObjInfo.Src == "" {
 			return errors.New("validation error: blank archive filename detected")
 		}
@@ -59,33 +66,45 @@ func (o FetchAndExtractRequest) validate() error {
 	return nil
 }
 
-func FetchAndExtract(ctx context.Context, req FetchAndExtractRequest) (*FetchAndExtractResponse, error) {
+func fetchAndExtract(ctx context.Context, req fetchAndExtractRequest) (*fetchAndExtractResponse, error) {
 	err := req.validate()
 	if err != nil {
 		return nil, err
 	}
 
 	body, err := doHttp(ctx, doHttpRequest{
-		url:    req.Url,
-		client: req.HttpClient,
+		url:    req.url,
+		client: req.httpClient,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("error during HTTP transaction - %w", err)
 	}
 
 	estr := extractSelectedToS3Request{
-		src:    body,
-		bucket: req.BucketName,
-		files:  req.Files,
-		etags:  make(map[string]string),
-		url:    req.Url,
+		src:       body,
+		bucket:    req.bucketName,
+		files:     req.files,
+		etags:     make(map[string]string),
+		url:       req.url,
+		awsConfig: req.awsConfig,
 	}
 	err = extractSelectedToS3(ctx, &estr)
 	if err != nil {
 		return nil, err
 	}
 
-	return &FetchAndExtractResponse{Etags: estr.etags}, nil
+	items := make([]fetchAndExtractResponseItem, len(estr.etags))
+	i := 0
+	for k, v := range estr.etags {
+		items[i] = fetchAndExtractResponseItem{
+			eTag:     v,
+			s3bucket: req.bucketName,
+			s3key:    k,
+		}
+		i++
+	}
+
+	return &fetchAndExtractResponse{items: items}, nil
 }
 
 type doHttpRequest struct {
@@ -125,11 +144,12 @@ func doHttp(ctx context.Context, req doHttpRequest) (io.ReadCloser, error) {
 }
 
 type extractSelectedToS3Request struct {
-	url    string
-	src    io.ReadCloser
-	bucket string
-	files  []S3ObjInfo
-	etags  map[string]string
+	awsConfig aws.Config
+	url       string
+	src       io.ReadCloser
+	bucket    string
+	files     []S3ObjInfo
+	etags     map[string]string
 }
 
 func extractSelectedToS3(ctx context.Context, req *extractSelectedToS3Request) error {
@@ -137,12 +157,7 @@ func extractSelectedToS3(ctx context.Context, req *extractSelectedToS3Request) e
 
 	mapByArchiveName := mapS3ObjInfoBySrcFile(req.files)
 
-	awsCfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return fmt.Errorf("error loading default AWS config - %w", err)
-	}
-
-	s3Client := s3.NewFromConfig(awsCfg)
+	s3Client := s3.NewFromConfig(req.awsConfig)
 
 	// map to keep track of files we've found and detect duplicates
 	foundInTar := make(map[string]struct{})

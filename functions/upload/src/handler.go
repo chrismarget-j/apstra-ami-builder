@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"log"
 	"os"
 )
@@ -29,12 +30,12 @@ type Tag struct {
 }
 
 type Response struct {
-	Bucket string            `json:"bucket,omitempty"`
-	Etags  map[string]string `json:"etags,omitempty"`
-	Error  string            `json:"error,omitempty"`
+	Bucket  string   `json:"bucket,omitempty"`
+	TaskIds []string `json:"task_ids,omitempty"`
+	Error   string   `json:"error,omitempty"`
 }
 
-func HandleRequest(request Request) (*Response, error) {
+func HandleRequest(ctx context.Context, request Request) (*Response, error) {
 	dump, err := json.Marshal(request)
 	if err != nil {
 		err = fmt.Errorf("error unmarshaling request - %w", err)
@@ -53,18 +54,39 @@ func HandleRequest(request Request) (*Response, error) {
 	}
 	log.Printf("files will be extracked to bucket '%s'", bucketName)
 
-	faer, err := FetchAndExtract(context.Background(), FetchAndExtractRequest{
-		Url:        request.Url,
-		BucketName: bucketName,
-		Files:      request.Files,
-	})
+	awsConfig, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		err := fmt.Errorf("error loading aws config - %w", err)
+		return &Response{Error: err.Error()}, err
+	}
 
+	faer, err := fetchAndExtract(ctx, fetchAndExtractRequest{
+		awsConfig:  awsConfig,
+		url:        request.Url,
+		bucketName: bucketName,
+		files:      request.Files,
+	})
 	if err != nil {
 		return nil, err
 	}
 
+	taskIds := make([]string, len(faer.items))
+	for i, item := range faer.items {
+		siri := snapshotImportRequestInput{
+			awsConfig: awsConfig,
+			s3Bucket:  item.s3bucket,
+			s3Key:     item.s3key,
+		}
+		siro, err := snapshotImport(ctx, siri)
+		if err != nil {
+			err := fmt.Errorf("error while importing snapshot - %w", err)
+			return &Response{Error: err.Error()}, err
+		}
+		taskIds[i] = siro.taskId
+	}
+
 	return &Response{
-		Bucket: bucketName,
-		Etags:  faer.Etags,
+		Bucket:  bucketName,
+		TaskIds: taskIds,
 	}, nil
 }
