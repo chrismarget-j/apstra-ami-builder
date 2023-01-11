@@ -1,0 +1,12 @@
+name: packages
+description: Install packages for apstra ami builder
+schemaVersion: 1.0
+
+phases:
+  - name: build
+    steps:
+      - name: InstallPackage
+        action: ExecuteBash
+        inputs:
+          commands:
+            - 'apt-get -y install --no-install-recommends jq qemu-utils'

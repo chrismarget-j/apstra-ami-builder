@@ -1,0 +1,23 @@
+name: DisableUnattendedUpdates
+description: Disable unattended upgrades on Ubuntu
+schemaVersion: 1.0
+
+phases:
+  - name: build
+    steps:
+      - name: DisableUnattendedUpgrades
+        action: ExecuteBinary
+        inputs:
+          path: /usr/bin/systemctl
+          arguments:
+            - "disable"
+            - "unattended-upgrades.service"
+      - name: RemoveUnattendedUpgrades
+        action: ExecuteBinary
+        inputs:
+          path: /usr/bin/apt-get
+          arguments:
+            - "-y"
+            - "--purge"
+            - "remove"
+            - "unattended-upgrades"

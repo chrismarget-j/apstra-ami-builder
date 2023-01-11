@@ -4,8 +4,10 @@ set -o pipefail
 REPOROOT=$(cd "$(dirname $0)"; pwd)
 TFROOT=${REPOROOT}/terraform
 
+INSTANCE_TYPE="t3a.small"
+
 DOWNLOAD_PAGE="https://support.juniper.net/support/downloads/?p=afc"
-FUNCTION_NAME_TFSTATE_PATH=".values.outputs.upload_function_name.value"
+ROLE_NAME_TFSTATE_PATH=".values.outputs.apstra_ami_builder_role_name.value"
 
 URI_REGEX='^(([^:/?#]+):)?(//((([^:/?#]+)@)?([^:/?#]+)(:([0-9]+))?))?(/([^?#]*))(\?([^#]*))?(#(.*))?'
 
@@ -14,23 +16,33 @@ die() {
   exit $2
 }
 
-remove_query_string() {
-  [[ "$1" =~ $URI_REGEX ]] || die "error parsing link" $?
-
-  # extract the query string length so we can trim it off
-  if [ ${#BASH_REMATCH[@]} -ge 13 ]; then
-    TRIM="${#BASH_REMATCH[12]}"
-  else
-    TRIM=0
-  fi
-
-  SHORT_URI="${URI:0:((${#URI}-$TRIM))}"
-}
-
 check_aws_creds() {
   echo -n "Checking for valid aws credentials..."
-  aws sts get-caller-identity > /dev/null
+  ACCOUNT_ID=$(aws sts get-caller-identity | jq -r ".Account")
   echo "  Done."
+}
+
+find_image() {
+  echo -n "Finding AMI..."
+  IMAGE_ID=$(aws ec2 describe-images --owners=self --filters "Name=name,Values=apstra-ami-builder *" | jq -r '.Images | sort_by(.CreationDate) | last .ImageId')
+  if [ -z "$IMAGE_ID" ] || [ "$IMAGE_ID" == "null" ]
+  then
+    die "AMI not found"
+  fi
+  echo "  Done."
+}
+
+prompt_for_link() {
+  echo ""
+  echo "Please visit $DOWNLOAD_PAGE and click"
+  echo "the link for \"Apstra VM Image for VMware ESXi\" (an \"ova\" file). Then copy"
+  echo "tokenized download link and paste it here."
+  echo ""
+  if DEFAULT_LINK_PROMPT=$(printenv APSTRA_DOWNLOAD_LINK); then
+    echo -n "Download link [$DEFAULT_LINK_PROMPT]: "
+  else
+    echo -n "Download link: "
+  fi
 }
 
 fetch_tf_state() {
@@ -43,9 +55,9 @@ fetch_tf_state() {
 
 parse_tf_state() {
   echo -n "Parsing terraform state..."
-  FUNCTION_NAME=$(jq -r "$FUNCTION_NAME_TFSTATE_PATH" <<< $STATE)
-  if [ "$FUNCTION_NAME" == "null" ]; then
-    die "  Upload lambda function name not found in terrraform state - is the project deployed?" $?
+  ROLE=$(jq -r "$ROLE_NAME_TFSTATE_PATH" <<< $STATE)
+  if [ "$ROLE" == "null" ]; then
+    die "  EC2 role name not found in terrraform state - is the project deployed?" $?
   fi
   echo "  Done."
 }
@@ -76,63 +88,44 @@ read_uri() {
   remove_query_string "$URI"
 }
 
-read_ova_filename() {
-  OVA_REGEX='^(aos_server_[0-9.]+-[0-9]+).ova$'
-  [[ "$OVA" =~ $OVA_REGEX ]] || die "error parsing ova filename within link" $?
-  VMDK="${BASH_REMATCH[1]}-disk1.vmdk"
+remove_query_string() {
+  [[ "$1" =~ $URI_REGEX ]] || die "error parsing link" $?
 
-  APSTRA_VERSION_REGEX='^aos_server_([0-9.]+)-([0-9]+).ova$'
-  [[ "$OVA" =~ $APSTRA_VERSION_REGEX ]] || die "error parsing ova version within link" $?
-  VERSION=${BASH_REMATCH[1]}
-  BUILD=${BASH_REMATCH[2]}
+  # extract the query string length so we can trim it off
+  if [ ${#BASH_REMATCH[@]} -ge 13 ]; then
+    TRIM="${#BASH_REMATCH[12]}"
+  else
+    TRIM=0
+  fi
+
+  SHORT_URI="${URI:0:((${#URI}-$TRIM))}"
 }
 
-make_tag() {
-  TAG="{}"
-  TAG=$(jq -c ".|.[\"key\"]=\"$1\"" <<< $TAG)
-  TAG=$(jq -c ".|.[\"value\"]=\"$2\"" <<< $TAG)
-  echo $TAG
+make_user_data() {
+  local breadcrumbs
+  local yaml
+
+  breadcrumbs="{}"
+  breadcrumbs=$(jq -c ".|.[\"ova_url\"]=\"$URI\"" <<< $breadcrumbs)
+
+  yaml=()
+  yaml+=("#cloud-config\n")
+  yaml+=("write_files:\n")
+  yaml+=("- encoding: b64\n")
+  yaml+=("  content: $(base64 <<< "$breadcrumbs")\n")
+  yaml+=("  owner: root:root\n")
+  yaml+=("  path: /var/local/ci-breadcrumbs.json\n")
+  yaml+=("  permissions: '0644'\n")
+
+  USER_DATA=$(IFS=; echo -e "${yaml[*]}")
 }
 
 check_aws_creds
+find_image
 fetch_tf_state
 parse_tf_state
 prompt_for_link
 read_uri
-read_ova_filename
+make_user_data
 
-URITAG=$(make_tag "url" "$SHORT_URI")
-VERTAG=$(make_tag "version" "$VERSION")
-BUILDTAG=$(make_tag "build" "$BUILD")
-NAMETAG=$(make_tag "Name" "apstra $VERSION")
-CITAG=$(make_tag "cloud-init" "false")
-
-TAGS=$(jq -s . <<< "$URITAG $VERTAG $BUILDTAG $NAMETAG $CITAG")
-
-S3OBJINFO="{}"
-S3OBJINFO=$(jq -c ".|.[\"src\"]=\"$VMDK\"" <<< $S3OBJINFO)
-S3OBJINFO=$(jq -c ".|.[\"dst\"]=\"$VMDK\"" <<< $S3OBJINFO)
-S3OBJINFO=$(jq -c ".|.[\"tags\"]=$TAGS" <<< $S3OBJINFO)
-
-FILES=$(jq -s . <<< $S3OBJINFO)
-
-REQUEST="{}"
-REQUEST=$(jq -c ".|.[\"url\"]=\"$URI\"" <<< $REQUEST)
-REQUEST=$(jq -c ".|.[\"files\"]=$FILES" <<< $REQUEST)
-
-echo ""
-echo "Initiating AMI deployment."
-echo "File '$VMDK' from the ova will be extracted as '$VMDK'."
-echo -n "This usually takes 1-2 minutes..."
-RESULT=$(aws lambda invoke --function-name $FUNCTION_NAME --payload file://<(echo $REQUEST) --cli-binary-format raw-in-base64-out --cli-read-timeout 180 /dev/stdout)
-echo "  Done."
-
-echo ""
-jq <<< $RESULT
-
-echo "check status with:"
-
-for task_id in $(jq -r '.task_ids | select (. != null) | .[]' <<< $RESULT)
-do
-  echo "  aws ec2 describe-import-snapshot-tasks --import-task-ids $task_id"
-done
+aws ec2 run-instances --image-id "$IMAGE_ID" --instance-type "$INSTANCE_TYPE" --iam-instance-profile "{\"Name\": \"$ROLE\"}" --user-data file:///dev/stdin <<< "$USER_DATA"

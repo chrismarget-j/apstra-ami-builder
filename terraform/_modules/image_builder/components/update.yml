@@ -1,0 +1,12 @@
+name: Update
+description: UpdateLinuxPackages
+schemaVersion: 1.0
+
+phases:
+  - name: build
+    steps:
+      - name: UpdatePakcages
+        action: ExecuteBash
+        inputs:
+          commands:
+            - 'apt-get -y update'

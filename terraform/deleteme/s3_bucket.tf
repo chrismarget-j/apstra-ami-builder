@@ -1,5 +1,5 @@
 resource "aws_s3_bucket" "ours" {
-  bucket_prefix = "apstra-images-"
+  bucket_prefix = "${local.project_name}-"
   force_destroy = true
 }
 

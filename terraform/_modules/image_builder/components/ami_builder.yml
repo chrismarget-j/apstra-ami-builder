@@ -1,0 +1,37 @@
+name: AmiBuilderScript
+description: Install AMI builder script
+schemaVersion: 1.0
+
+phases:
+  - name: build
+    steps:
+      - name: MkDir
+        action: ExecuteBash
+        inputs:
+          commands:
+            - 'mkdir -p "${DESTDIR}"'
+      - name: FetchAmiBuilder
+        action: S3Download
+        inputs:
+          - source: ${SOURCE}
+            destination: ${DESTDIR}/${FILENAME}
+      - name: Chmod
+        action: ExecuteBash
+        inputs:
+          commands:
+            - 'chmod 755 "${DESTDIR}/${FILENAME}"'
+      - name: ApstraAmiService
+        action: ExecuteBash
+        inputs:
+          commands:
+            - 'echo "[Unit]"                            > /etc/systemd/system/apstra-ami.service'
+            - 'echo "After=multi-user.target"          >> /etc/systemd/system/apstra-ami.service'
+            - 'echo ""                                 >> /etc/systemd/system/apstra-ami.service'
+            - 'echo "[Service]"                        >> /etc/systemd/system/apstra-ami.service'
+            - 'echo "Type=oneshot"                     >> /etc/systemd/system/apstra-ami.service'
+            - 'echo "ExecStart=${DESTDIR}/${FILENAME}" >> /etc/systemd/system/apstra-ami.service'
+            - 'echo ""                                 >> /etc/systemd/system/apstra-ami.service'
+            - 'echo "[Install]"                        >> /etc/systemd/system/apstra-ami.service'
+            - 'echo "WantedBy=default.target"          >> /etc/systemd/system/apstra-ami.service'
+            - 'systemctl daemon-reload'
+            - 'systemctl enable apstra-ami.service'

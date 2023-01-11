@@ -1,0 +1,5 @@
+{
+  "ova_url": "https://thisissostupid.s3.amazonaws.com/aos_server_4.1.2-268.ova"
+}
+
+base64 --decode <<< "ewogICJvdmFfdXJsIjogImh0dHBzOi8vdGhpc2lzc29zdHVwaWQuczMuYW1hem9uYXdzLmNvbS9hb3Nfc2VydmVyXzQuMS4yLTI2OC5vdmEiCn0K" > /var/local/ci-breadcrumbs.json

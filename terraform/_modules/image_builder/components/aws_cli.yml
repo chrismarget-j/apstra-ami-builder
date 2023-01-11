@@ -1,0 +1,16 @@
+name: AwsCLI
+description: Install AWS CLI
+schemaVersion: 1.0
+
+phases:
+  - name: build
+    steps:
+      - name: InstallPackage
+        action: ExecuteBash
+        inputs:
+          commands:
+            - 'apt-get -y install --no-install-recommends unzip'
+            - 'curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "/tmp/awscliv2.zip"'
+            - 'unzip awscliv2.zip -d /tmp'
+            - '/tmp/aws/install'
+            - 'rm -rf /tmp/aws /tmp/awscliv2.zip'
