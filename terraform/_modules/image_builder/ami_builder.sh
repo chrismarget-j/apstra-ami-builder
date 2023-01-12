@@ -248,7 +248,7 @@ register_image() {
   image_info=$(aws ec2 register-image \
     --region "$REGION" \
     --description "Apstra with cloud-init" \
-    --name "Apstra $version" \
+    --name "Apstra $VERSION" \
     --ena-support \
     --imds-support "v2.0" \
     --root-device-name "/dev/sda1" \
@@ -263,7 +263,7 @@ register_image() {
   aws ec2 create-tags --region "$REGION" --resources "$image_id" --tags "Key=build,Value=$build"
 }
 
-VERSION=$(basename $OVA_URI | sed -e 's/^aos_server_//' -e 's/.ova$//')
+VERSION=$(basename $(remove_query_string "$OVA_URI") | sed -e 's/^aos_server_//' -e 's/.ova$//')
 setup_aws_stuff
 fetch_image
 new_volume
@@ -276,3 +276,5 @@ detach_volume
 snapshot "$VOLUME_ID" "apstra $VERSION"
 delete_volume
 register_image
+
+shutdown

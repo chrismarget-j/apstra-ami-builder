@@ -128,4 +128,14 @@ prompt_for_link
 read_uri
 make_user_data
 
-aws ec2 run-instances --image-id "$IMAGE_ID" --instance-type "$INSTANCE_TYPE" --iam-instance-profile "{\"Name\": \"$ROLE\"}" --user-data file:///dev/stdin <<< "$USER_DATA"
+INSTANCE_INFO=$(aws ec2 run-instances \
+  --image-id "$IMAGE_ID" \
+  --instance-type "$INSTANCE_TYPE" \
+  --iam-instance-profile "{\"Name\": \"$ROLE\"}" \
+  --instance-initiated-shutdown-behavior terminate \
+  --user-data file:///dev/stdin \
+  <<< "$USER_DATA")
+
+INSTANCE_ID=$(jq -r '.Instances[0].InstanceId' <<< "$INSTANCE_INFO")
+
+echo "Instance $INSTANCE_ID is building the AMI..."
