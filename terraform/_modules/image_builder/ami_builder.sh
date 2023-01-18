@@ -211,6 +211,8 @@ aos_fixup() {
   umount "$ROOT_MNT_POINT/run/systemd/resolve/resolv.conf"
   rm -rf "$ROOT_MNT_POINT/run/systemd"
 
+  sed -i 's/^\(-A INPUT.*-p tcp.*\)/#unsafe-default \1/' ${ROOT_MNT_POINT}/etc/iptables/rules.v4
+
   umount_aos
 }
 
