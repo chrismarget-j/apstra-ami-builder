@@ -48,20 +48,20 @@ func (o fetchAndExtractRequest) validate() error {
 	dstMap := make(map[string]struct{}, len(o.files))
 	srcMap := make(map[string]struct{}, len(o.files))
 	for _, s3ObjInfo := range o.files {
-		if s3ObjInfo.Src == "" {
+		if *s3ObjInfo.Src == "" {
 			return errors.New("validation error: blank archive filename detected")
 		}
-		if s3ObjInfo.Dst == "" {
+		if *s3ObjInfo.Dst == "" {
 			return errors.New("validation error: blank s3 target key detected")
 		}
-		if _, found := srcMap[s3ObjInfo.Src]; found {
+		if _, found := srcMap[*s3ObjInfo.Src]; found {
 			return fmt.Errorf("validation error: archive filename '%s' specified more than once", s3ObjInfo.Src)
 		}
-		if _, found := dstMap[s3ObjInfo.Dst]; found {
+		if _, found := dstMap[*s3ObjInfo.Dst]; found {
 			return fmt.Errorf("validation error: S3 target key '%s' specified more than once", s3ObjInfo.Dst)
 		}
-		dstMap[s3ObjInfo.Dst] = struct{}{}
-		srcMap[s3ObjInfo.Src] = struct{}{}
+		dstMap[*s3ObjInfo.Dst] = struct{}{}
+		srcMap[*s3ObjInfo.Src] = struct{}{}
 	}
 	return nil
 }
@@ -197,14 +197,14 @@ func extractSelectedToS3(ctx context.Context, req *extractSelectedToS3Request) e
 				len:      header.Size,
 				bucket:   req.bucket,
 				s3Client: s3Client,
-				src:      s3ObjInfo.Src,
-				dst:      s3ObjInfo.Dst,
+				src:      *s3ObjInfo.Src,
+				dst:      *s3ObjInfo.Dst,
 				tags:     s3ObjInfo.Tags,
 			})
 			if err != nil {
 				return fmt.Errorf("error extracing file to s3 - %w", err)
 			}
-			req.etags[s3ObjInfo.Dst] = apiResponse.etag
+			req.etags[*s3ObjInfo.Dst] = apiResponse.etag
 		} else {
 			log.Printf("skipping '%s'\n", header.Name)
 		}
@@ -219,8 +219,8 @@ func extractSelectedToS3(ctx context.Context, req *extractSelectedToS3Request) e
 	missing := make([]string, len(req.files)-len(foundInTar))
 	var i int
 	for _, s3ObjInfo := range req.files {
-		if _, found := foundInTar[s3ObjInfo.Src]; !found {
-			missing[i] = s3ObjInfo.Src
+		if _, found := foundInTar[*s3ObjInfo.Src]; !found {
+			missing[i] = *s3ObjInfo.Src
 			i++
 		}
 	}
@@ -230,7 +230,7 @@ func extractSelectedToS3(ctx context.Context, req *extractSelectedToS3Request) e
 func mapS3ObjInfoBySrcFile(in []S3ObjInfo) map[string]*S3ObjInfo {
 	result := make(map[string]*S3ObjInfo, len(in))
 	for i, s3ObjInfo := range in {
-		result[s3ObjInfo.Src] = &in[i]
+		result[*s3ObjInfo.Src] = &in[i]
 	}
 	return result
 }

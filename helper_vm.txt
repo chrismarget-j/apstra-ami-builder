@@ -1,0 +1,75 @@
+OWNER_ID=099720109477
+ARCHITECTURE=x86_64
+INSTANCE_TYPE=t3a.small
+AMI=$(aws ec2 describe-images --filters Name=owner-id,Values=$OWNER_ID Name=architecture,Values=$ARCHITECTURE Name=name,Values="ubuntu/images*22.04*" --query 'Images[*].[ImageId,CreationDate]' --output text | sort -k2 -r | head -1 | awk '{print $1}')
+AMI="ami-0574da719dca65348"
+aws ec2 run-instances --image-id $AMI --instance-type $INSTANCE_TYPE --key-name bogus
+aws ec2 run-instances --image-id $AMI --instance-type $INSTANCE_TYPE --key-name bogus --user-data "\#\!/bin/bash
+touch /root/foo
+"
+
+aws ec2 describe-instances --filters Name=owner-id,Values=$OWNER_ID
+
+S3URL="s3://apstra-images-20221214164737798700000006/aos_server_4.1.0-115-disk1.vmdk"
+SCRATCHPAD="/root"
+DEVICE="/dev/sdd"
+VMDK="/root/$(basename $S3URL)"
+
+time apt-get update -y --no-install-recommends
+time apt-get install -y --no-install-recommends awscli jq qemu-utils
+
+TOKEN=`curl -sX PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600"`
+IDENTITY=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/dynamic/instance-identity/document)
+AZ=$(jq -r '.availabilityZone' <<< "$IDENTITY")
+REGION=$(jq -r '.region' <<< "$IDENTITY")
+INSTANCE_ID=$(jq -r '.instanceId' <<< "$IDENTITY")
+
+time aws s3 cp "$S3URL" "$VMDK"
+SIZEB=$(qemu-img info -f vmdk $VMDK --output=json | jq -r '."virtual-size"')
+SIZEG=$((($SIZEB/1024/1024/1024)+1))
+
+VOL_INFO=$(aws ec2 create-volume --region "$REGION" --availability-zone "$AZ" --size "$SIZEG" --volume-type gp3 --iops 3000)
+VOLUME_ID=$(jq -r '.VolumeId' <<< "$VOL_INFO")
+while true
+do
+  VOLUME_DESCRIPTION=$(aws ec2 describe-volumes --volume-ids $VOLUME_ID --region $REGION)
+  VOLUME_STATE=$(jq -r ".Volumes[0].State" <<< "$VOLUME_DESCRIPTION")
+  echo $VOLUME_STATE
+  if [ "$VOLUME_STATE" == "available" ]
+  then
+    break
+  fi
+done
+
+aws ec2 attach-volume --region "$REGION" --instance-id $INSTANCE_ID --volume-id $(jq -r '.VolumeId' <<< "$VOL_INFO") --device=$DEVICE
+while true
+do
+  EBS_INFO=$(aws ec2 describe-instances --instance-id $INSTANCE_ID --region $REGION | jq -r ".Reservations[0].Instances[0].BlockDeviceMappings[]")
+  ATTACH_STATUS=$(jq -r "select(.DeviceName==\"$DEVICE\").Ebs.Status" <<< "$EBS_INFO")
+  echo status: $ATTACH_STATUS
+  if [ "$ATTACH_STATUS" == "attached" ]
+  then
+    break
+  fi
+  sleep 1
+done
+
+time qemu-img dd -O raw -f vmdk bs=32m if=$VMDK of=/dev/nvme1n1
+time qemu-img convert -p -O raw -f vmdk $VMDK /dev/nvme1n1
+
+time qemu-img dd -O raw -f vmdk bs=32m if=$VMDK of=$DEVICE
+
+
+qemu-img info -f vmdk $VMDK --output=json
+create volume
+apt-get update -y --no-install-recommends
+create volume from snapshot
+create new aws instance
+attach volume to snapshot
+mount disks on /mnt
+chage -R /mnt -d -1 admin
+rm /mnt/etc/resolv.conf
+mount -o ro,bind /etc/resolv.conf /mnt/etc/resolv.conf
+echo "nameserver 8.8.8.8" > /mnt/etc/resolv.conf
+chroot /mnt apt-get update -y
+chroot /mnt apt-get install -y cloud-init

@@ -218,7 +218,6 @@ aos_fixup() {
 
 umount_aos() {
   local mounted
-  local relevant
 
   while (mount | grep -qE " $ROOT_MNT_POINT")
   do

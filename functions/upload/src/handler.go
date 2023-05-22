@@ -19,9 +19,9 @@ type Request struct {
 }
 
 type S3ObjInfo struct {
-	Src  string `json:"src"`
-	Dst  string `json:"dst"`
-	Tags []Tag  `json:"tags"`
+	Src  *string `json:"src"`
+	Dst  *string `json:"dst"`
+	Tags []Tag   `json:"tags"`
 }
 
 type Tag struct {
