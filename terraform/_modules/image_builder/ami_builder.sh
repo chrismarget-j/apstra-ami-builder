@@ -207,6 +207,7 @@ aos_fixup() {
 
   chroot "$ROOT_MNT_POINT" apt-get update -y
   chroot "$ROOT_MNT_POINT" apt-get install -y cloud-init
+  rm -f "${ROOT_MNT_POINT}/etc/cloud/cloud-init.disabled"
 
   umount "$ROOT_MNT_POINT/run/systemd/resolve/resolv.conf"
   rm -rf "$ROOT_MNT_POINT/run/systemd"
