@@ -80,7 +80,7 @@ resource "aws_iam_policy" "apstra_ami_builder" {
           "ec2:CreateVolume",
           "ec2:DeleteVolume",
         ]
-        Resource = "arn:aws:ec2:*:086704128018:volume/*"
+        Resource = "arn:aws:ec2:*:${data.aws_caller_identity.ours.account_id}:volume/*"
       },
       {
         Effect = "Allow",
@@ -98,8 +98,8 @@ resource "aws_iam_policy" "apstra_ami_builder" {
           "ec2:AttachVolume"
         ],
         Resource = [
-          "arn:aws:ec2:*:086704128018:instance/*",
-          "arn:aws:ec2:*:086704128018:volume/*"
+          "arn:aws:ec2:*:${data.aws_caller_identity.ours.account_id}:instance/*",
+          "arn:aws:ec2:*:${data.aws_caller_identity.ours.account_id}:volume/*"
         ]
       },
       {
@@ -110,7 +110,7 @@ resource "aws_iam_policy" "apstra_ami_builder" {
         ]
         Resource = [
           "arn:aws:ec2:*::snapshot/*",
-          "arn:aws:ec2:*:086704128018:volume/*",
+          "arn:aws:ec2:*:${data.aws_caller_identity.ours.account_id}:volume/*",
           "arn:aws:ec2:*::image/*",
         ]
       },

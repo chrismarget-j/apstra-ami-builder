@@ -29,7 +29,7 @@ find_image() {
   then
     die "AMI not found"
   fi
-  echo "  Done."
+  echo "  Images will be built by $IMAGE_ID."
 }
 
 prompt_for_link() {
@@ -59,7 +59,7 @@ parse_tf_state() {
   if [ "$ROLE" == "null" ]; then
     die "  EC2 role name not found in terrraform state - is the project deployed?" $?
   fi
-  echo "  Done."
+  echo "  Images will be built by role $ROLE."
 }
 
 prompt_for_link() {

@@ -10,7 +10,7 @@ resource "aws_iam_policy" "apstra_testbed" {
       {
         Effect   = "Allow"
         Action   = ["dynamodb:DeleteItem", "dynamodb:GetItem", "dynamodb:PutItem"]
-        Resource = "arn:aws:dynamodb:us-east-1:086704128018:table/terraform-state-lock"
+        Resource = "arn:aws:dynamodb:us-east-1:${data.aws_caller_identity.ours.account_id}:table/terraform-state-lock"
       },
       {
         Effect   = "Allow"
