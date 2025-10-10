@@ -45,7 +45,7 @@ resource "aws_imagebuilder_component" "aws_cli" {
 
 resource "aws_imagebuilder_image_recipe" "ours" {
   name         = local.project_name
-  version      = "0.0.1"
+  version      = "0.0.2"
   parent_image = data.aws_ami.ubuntu_2204.id
 
   block_device_mapping {
@@ -53,7 +53,7 @@ resource "aws_imagebuilder_image_recipe" "ours" {
 
     ebs {
       delete_on_termination = true
-      volume_size           = 8
+      volume_size           = 10
       volume_type           = "gp3"
     }
   }
