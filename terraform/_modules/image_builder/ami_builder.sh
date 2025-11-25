@@ -239,7 +239,7 @@ wait_pvol() {
 }
 
 aos_fixup() {
-  if [ -z "$1" ]; then
+  if [ $# -eq 0 ]; then
     set 1
   fi
 
