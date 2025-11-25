@@ -193,11 +193,20 @@ wait_snapshot_state() {
 check_version() {
   local linenum
   case $2 in
-    before|between)
+    before)
+      linenum=2;;
+    between)
       linenum=2;;
     after)
       linenum=1;;
   esac
+
+  if [ "$2" == "between" ]; then
+    [ $# -eq 4 ] || die "check_version with 'between' requires 4 arguments, got $#"
+  else
+    [ $# -eq 3 ] || die "check_version with 'before/after' requires 3 arguments, got $#"
+    set -- "$@" "" # add a fourth bogus positional parameter so we can safely reference $4 below
+  fi
 
   if [ "$(printf "%s\n%s\n%s\n" $1 $3 $4 | sort -Vr | sed "${linenum}q;d")" == "$1" ]
   then
