@@ -30,7 +30,7 @@ die() {
   echo "die: $i"
   if [ -n "$VOL_INFO" ]
   then
-    umount_aos
+    umount_all
     detach_volume
   fi
   exit 1
@@ -190,7 +190,67 @@ wait_snapshot_state() {
   done
 }
 
+check_version() {
+  local linenum
+  case $2 in
+    before|between)
+      linenum=2;;
+    after)
+      linenum=1;;
+  esac
+
+  if [ "$(printf "%s\n%s\n%s\n" $1 $3 $4 | sort -Vr | sed "${linenum}q;d")" == "$1" ]
+  then
+    true
+  else
+    false
+  fi
+}
+
+umount_all() {
+  mount | egrep "${ROOT_MNT_POINT} |${ROOT_MNT_POINT}/" | awk '{print $3}' | sort -r | while read path
+  do
+    umount $path
+  done
+}
+
+wait_pvol() {
+  local pvolinfo
+  i=0
+  while [ $i -lt 10 ];do
+    ((i=i+1))
+    pvolinfo="$(pvs | grep ${DISK}p)"
+    if [ -n "$pvolinfo" ]; then
+      break
+      sleep 1
+    fi
+  done
+
+  [ -n "$pvolinfo" ] || die "failed to find pvol info for $1"
+}
+
 aos_fixup() {
+  if [ -z "$1" ]; then
+    set 1
+  fi
+
+  vgscan --mknodes --notify-dbus
+  wait_pvol "$DISK"
+
+  ROOTDEV=$(blkid | grep "${DISK}p" | grep "PARTLABEL=\"apstra_${1}_root\"" | awk '{print $1}' | sed 's/://')
+  mount "$ROOTDEV" "$ROOT_MNT_POINT"
+  grep '^/dev/disk/by-id/dm-uuid-LVM-' "${ROOT_MNT_POINT}/etc/fstab" | while read -r dev mountpoint fstype opts _ _; do
+    mount "$dev" "${ROOT_MNT_POINT}${mountpoint}"
+  done
+
+  chage -R "$ROOT_MNT_POINT" -d -1 admin
+  sed -i 's/^\(-A INPUT.*-p tcp.*\)/#unsafe-default \1/' ${ROOT_MNT_POINT}/etc/iptables/rules.v4
+  sed -i 's/^\(-A INPUT.*-p tcp.*\)/#unsafe-default \1/' ${ROOT_MNT_POINT}/etc/iptables/rules.v6
+
+  umount_all
+}
+
+aos_fixup_60x_and_earlier() {
   vgscan --mknodes --notify-dbus
 
   wait_aos_partition "$ROOT_BLK_DEV"
@@ -214,20 +274,7 @@ aos_fixup() {
 
   sed -i 's/^\(-A INPUT.*-p tcp.*\)/#unsafe-default \1/' ${ROOT_MNT_POINT}/etc/iptables/rules.v4
 
-  umount_aos
-}
-
-umount_aos() {
-  local mounted
-
-  while (mount | grep -qE " $ROOT_MNT_POINT")
-  do
-    mounted=$(mount | grep -E " $ROOT_MNT_POINT" | awk '{print $3}')
-    for i in $mounted
-    do
-      umount "$i" || true
-    done
-  done
+  umount_all
 }
 
 snapshot() {
@@ -266,6 +313,7 @@ register_image() {
 }
 
 VERSION=$(basename $(remove_query_string "$OVA_URI") | sed -e 's/^aos_server_//' -e 's/.ova$//')
+VERSION_WITHOUT_TAG=$(sed 's/[^0-9.].*$//' <<< "$VERSION")
 setup_aws_stuff
 fetch_image
 new_volume
@@ -273,7 +321,13 @@ BEFORE=$(lsblk | grep disk | awk '{print $1}')
 attach_volume
 DISK=$(find_new_disk "$BEFORE")
 time extract_vmdk "$DISK"
-aos_fixup
+
+if check_version $VERSION_WITHOUT_TAG after 6.1.0; then
+  aos_fixup
+else
+  aos_fixup_60x_and_earlier
+fi
+
 detach_volume
 snapshot "$VOLUME_ID" "apstra $VERSION"
 delete_volume
