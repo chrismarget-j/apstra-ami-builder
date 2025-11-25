@@ -171,7 +171,7 @@ wait_snapshot_state() {
   local snapshot=$1
   local state=$2
   i=0
-  while [ $i -lt 2400 ]
+  while [ $i -lt 7200 ]
   do
     ((i=i+1))
     local snapshot_info=$(aws ec2 describe-snapshots --snapshot-ids "$snapshot" --region "$REGION")
