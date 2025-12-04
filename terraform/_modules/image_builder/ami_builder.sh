@@ -252,11 +252,13 @@ aos_fixup() {
     mount "$dev" "${ROOT_MNT_POINT}${mountpoint}"
   done
 
+  # cloud-init use EC2 data source if possible
+#  sed -i '/- NoCloud/i\  - EC2' "${ROOT_MNT_POINT}/etc/cloud/cloud.cfg.d/99_aos.cfg"
+  rm "${ROOT_MNT_POINT}/etc/cloud/cloud.cfg.d/99_aos.cfg"
+
   chage -R "$ROOT_MNT_POINT" -d -1 admin
   sed -i 's/^\(-A INPUT.*-p tcp.*\)/#unsafe-default \1/' ${ROOT_MNT_POINT}/etc/iptables/rules.v4
   sed -i 's/^\(-A INPUT.*-p tcp.*\)/#unsafe-default \1/' ${ROOT_MNT_POINT}/etc/iptables/rules.v6
-
-  umount_all
 }
 
 aos_fixup_60x_and_earlier() {
@@ -282,8 +284,6 @@ aos_fixup_60x_and_earlier() {
   rm -rf "$ROOT_MNT_POINT/run/systemd"
 
   sed -i 's/^\(-A INPUT.*-p tcp.*\)/#unsafe-default \1/' ${ROOT_MNT_POINT}/etc/iptables/rules.v4
-
-  umount_all
 }
 
 snapshot() {
@@ -336,6 +336,8 @@ if check_version $VERSION_WITHOUT_TAG after 6.1.0; then
 else
   aos_fixup_60x_and_earlier
 fi
+
+umount_all
 
 detach_volume
 snapshot "$VOLUME_ID" "apstra $VERSION"
